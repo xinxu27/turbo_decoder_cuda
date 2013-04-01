@@ -130,7 +130,7 @@ long seed = 1234421;
 
 
 
-#define L_TOTAL 128	// if u want to use block interleave,L_TOTAL must = x^2
+#define L_TOTAL 1024	// if u want to use block interleave,L_TOTAL must = x^2
 #define M	2	// register length,=tail length
 #define NSTATE	4	// = M^2
 #define L_ALL 3*L_TOTAL	// coded frame length
@@ -189,7 +189,7 @@ static const char TailBit[NSTATE] = // tail info bits when trellis is terminatin
 };
 
 #define MAXITER 5
-//#define	FRAME_NUM 10
+#define	FRAME_NUM 100
 
 UINT m_Inter_table[L_TOTAL];
 
@@ -337,7 +337,7 @@ __global__ void gammaBeta(double * msg ,double * parity, double * L_a, double (*
     }
 }
 
-void Alpha(double (*AlphaHost)[4], double (*gamma)[4][4]) {
+void computeAlpha(double (*AlphaHost)[4], double (*gamma)[4][4]) {
     // initialize Alpha & Beta
     AlphaHost[0][0]=0;
 	UINT s1,k,s2,sum;
@@ -350,7 +350,7 @@ void Alpha(double (*AlphaHost)[4], double (*gamma)[4][4]) {
             sum = 0;
             for (s1=0;s1<NSTATE;s1++)
                 sum+=exp(gamma[k-1][s2][s1]+AlphaHost[k-1][s1]);
-            if (sum<1E-300)
+            if (sum < 1E-300)
                 AlphaHost[k][s2]=-INIFINITY;
             else
                 AlphaHost[k][s2]=log(sum);
@@ -454,6 +454,20 @@ __global__ void exestimateInformationBits(double * L_all, BYTE * msghat, UINT * 
         msghat[m_Inter_table[tid]]=0;
 }
 
+void countErrors(BYTE *m, BYTE * mhat, UINT * bitsError, UINT * frameError, UINT iter) {
+
+	bool f_err = false;
+	for (int i=0; i<(L_TOTAL-M);i++) {
+		if (m[i] != mhat[i]) {
+			bitsError[iter] = bitsError[iter]+1;
+			f_err = true;
+		}
+	}
+
+	if (f_err) 
+		frameError[iter] = frameError[iter]+1;
+}
+
 
 int main(int argc, char* argv[])
 {
@@ -464,9 +478,9 @@ int main(int argc, char* argv[])
 	double * y;
 	BYTE * mhat;
 
-	//int frame;
-	//int bits_all,bits_err[MAXITER],frame_err[MAXITER];
-	//double Ber,Fer;
+	int frame;
+	UINT bits_all,bits_err[MAXITER],frame_err[MAXITER];
+	double Ber,Fer;
 	double Eb_No_dB,No;
 	//bool f_err;
 	//FILE * fp;
@@ -480,23 +494,6 @@ int main(int argc, char* argv[])
 	init_Block_interleave_table();	// block interleave
 
 
-	Eb_No_dB=-3.0;
-    No = 1/pow(10.0,Eb_No_dB/10.0);
-
-    // Generate random information bits
-    for (i=0;i<L_TOTAL;i++)
-        if (boolrandom())
-            m[i]=1;
-        else
-            m[i]=0;
-    // encoder
-    encode(m,x,false);
-    // add noise
-    for (i=0;i<L_ALL;i++)
-        if (x[i])
-            y[i]=1.0+gaussian(No/2);
-        else
-            y[i]=-1.0+gaussian(No/2);
     
     findCudaDevice(argc, (const char **)argv);
 
@@ -536,13 +533,13 @@ int main(int argc, char* argv[])
     cudaMalloc((void **)&L_allDevice, L_TOTAL*sizeof(double));
     cudaMalloc((void **)&gammaAlphaDevice, L_TOTAL*sizeof(double)*4*4);
     cudaMalloc((void **)&gammaBetaDevice, L_TOTAL*sizeof(double)*4*4);
-    cudaMalloc((void **)&AlphaDevice, L_TOTAL*sizeof(double)*4);
-    cudaMalloc((void **)&BetaDevice, L_TOTAL*sizeof(double)*4);
+    cudaMalloc((void **)&AlphaDevice, (L_TOTAL+1)*sizeof(double)*4);
+    cudaMalloc((void **)&BetaDevice, (L_TOTAL+1)*sizeof(double)*4);
 
     double gammaAlphaHost[L_TOTAL][4][4];
     double gammaBetaHost[L_TOTAL][4][4];
-    double AlphaHost[L_TOTAL][4];
-    double BetaHost[L_TOTAL][4];
+    double AlphaHost[L_TOTAL+1][4];
+    double BetaHost[L_TOTAL+1][4];
 
 
     cudaMemcpy(LastStateDevice,LastState,sizeof(BYTE)*2*4, cudaMemcpyHostToDevice);
@@ -551,69 +548,133 @@ int main(int argc, char* argv[])
     cudaMemcpy(NextOutDevice,NextOut,sizeof(char)*2*4, cudaMemcpyHostToDevice);
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
-    cudaMemcpy(yDevice,y,sizeof(double)*L_ALL, cudaMemcpyHostToDevice);
 
-    demultiplex<<<1,L_TOTAL>>>(yDevice, msgDevice, parity0Device, parity1Device); 
-    interLeave<<<1,L_TOTAL>>>(msgDevice, imsgDevice, tableDevice);
-    initializeExtrinsicInformation<<<1,L_TOTAL>>>(L_eDevice);
+	for (Eb_No_dB=-3.0;Eb_No_dB<5.0;Eb_No_dB+=0.5){
 
-    for (int iter = 0; iter<MAXITER; iter++) {
-        
-        deInterLeave<<<1,L_TOTAL>>>(L_eDevice, L_aDevice, tableDevice);
+		No = 1/pow(10.0,Eb_No_dB/10.0);
+		bits_all = 0;
+		for (i =0; i<MAXITER;i++) {
+			bits_err[i]=0;
+			frame_err[i]=0;
+		}
 
-        gammaAlpha<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaAlphaDevice,LastStateDevice, LastOutDevice);
-        gammaBeta<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-        cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*4*4, cudaMemcpyDeviceToHost);
-        cudaMemcpy(gammaBetaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*4*4, cudaMemcpyDeviceToHost);
+		for (frame = 0; frame<FRAME_NUM; frame++, bits_all += (L_TOTAL-M)) {
 
-        Alpha(AlphaHost, gammaAlphaHost);
-        Beta(BetaHost, gammaBetaHost, true);
-        cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*L_TOTAL*4, cudaMemcpyHostToDevice);
-        cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*L_TOTAL*4, cudaMemcpyHostToDevice);
-        normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
+			// Generate random information bits
+			for (i=0;i<L_TOTAL;i++)
+				if (boolrandom())
+					m[i]=1;
+				else
+					m[i]=0;
+			// encoder
+			encode(m,x,false);
+			// add noise
+			for (i=0;i<L_ALL;i++)
+				if (x[i])
+					y[i]=1.0+gaussian(No/2);
+				else
+					y[i]=-1.0+gaussian(No/2);
 
-        LLRS<<<1,L_TOTAL>>>(msgDevice, parity0Device, L_aDevice, AlphaDevice, BetaDevice, L_allDevice,LastStateDevice, LastOutDevice);
+			cudaMemcpy(yDevice,y,sizeof(double)*L_ALL, cudaMemcpyHostToDevice);
 
-        extrinsicInformation<<<1, L_TOTAL>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
-        interLeave<<<1, L_TOTAL>>>(L_eDevice, L_aDevice, tableDevice);
+			demultiplex<<<1,L_TOTAL>>>(yDevice, msgDevice, parity0Device, parity1Device); 
+			interLeave<<<1,L_TOTAL>>>(msgDevice, imsgDevice, tableDevice);
+			initializeExtrinsicInformation<<<1,L_TOTAL>>>(L_eDevice);
 
-        gammaAlpha<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaAlphaDevice, LastStateDevice, LastOutDevice);
-        gammaBeta<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-        cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*4*4, cudaMemcpyDeviceToHost);
-        cudaMemcpy(gammaBetaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*4*4, cudaMemcpyDeviceToHost);
+			for (int iter = 0; iter<MAXITER; iter++) {
+				
+				deInterLeave<<<1,L_TOTAL>>>(L_eDevice, L_aDevice, tableDevice);
 
-        Alpha(AlphaHost, gammaAlphaHost);
-        Beta(BetaHost, gammaBetaHost, false);
-        cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*L_TOTAL*4, cudaMemcpyHostToDevice);
-        cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*L_TOTAL*4, cudaMemcpyHostToDevice);
-        normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
+				gammaAlpha<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaAlphaDevice,LastStateDevice, LastOutDevice);
+				gammaBeta<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
+				cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*4*4, cudaMemcpyDeviceToHost);
+				cudaMemcpy(gammaBetaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*4*4, cudaMemcpyDeviceToHost);
 
-        LLRS<<<1,L_TOTAL>>>(imsgDevice, parity1Device, L_aDevice, AlphaDevice, BetaDevice, L_allDevice, LastStateDevice,LastOutDevice);
+				computeAlpha(AlphaHost, gammaAlphaHost);
+				Beta(BetaHost, gammaBetaHost, true);
+				cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*(L_TOTAL+1)*4, cudaMemcpyHostToDevice);
+				cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*(L_TOTAL+1)*4, cudaMemcpyHostToDevice);
+				normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
 
-        extrinsicInformation<<<1, L_TOTAL>>>(L_allDevice, imsgDevice, L_aDevice, L_eDevice);
-    }
+				LLRS<<<1,L_TOTAL>>>(msgDevice, parity0Device, L_aDevice, AlphaDevice, BetaDevice, L_allDevice,LastStateDevice, LastOutDevice);
 
+				extrinsicInformation<<<1, L_TOTAL>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
+				interLeave<<<1, L_TOTAL>>>(L_eDevice, L_aDevice, tableDevice);
 
-    //double L_all[L_TOTAL];
-    //unsigned int msghat[L_TOTAL];
+				gammaAlpha<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaAlphaDevice, LastStateDevice, LastOutDevice);
+				gammaBeta<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
+				cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*4*4, cudaMemcpyDeviceToHost);
+				cudaMemcpy(gammaBetaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*4*4, cudaMemcpyDeviceToHost);
 
-    // estimate information bits
-    exestimateInformationBits<<<1,L_TOTAL>>>(L_allDevice, mhatDevice, tableDevice); 
-    cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
+				computeAlpha(AlphaHost, gammaAlphaHost);
+				Beta(BetaHost, gammaBetaHost, false);
+				cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*(L_TOTAL+1)*4, cudaMemcpyHostToDevice);
+				cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*(L_TOTAL+1)*4, cudaMemcpyHostToDevice);
+				normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
 
-    // count errors
-    UINT bits_err = 0;
-    for (i=0;i<L_TOTAL-M;i++) {
-        if (mhat[i]!=m[i]) {
-            bits_err++;
-        }
-    }
-    cout<<"bits_err: "<<bits_err<<endl;
+				LLRS<<<1,L_TOTAL>>>(imsgDevice, parity1Device, L_aDevice, AlphaDevice, BetaDevice, L_allDevice, LastStateDevice,LastOutDevice);
+
+				extrinsicInformation<<<1, L_TOTAL>>>(L_allDevice, imsgDevice, L_aDevice, L_eDevice);
+
+				exestimateInformationBits<<<1,L_TOTAL>>>(L_allDevice, mhatDevice, tableDevice); 
+
+				cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
+				countErrors(m, mhat, bits_err, frame_err, iter);
+			}
+			// estimate information bits
+			//exestimateInformationBits<<<1,L_TOTAL>>>(L_allDevice, mhatDevice, tableDevice); 
+
+			//cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
+			// count errors
+			//UINT bits_err = 0;
+			//for (i=0;i<L_TOTAL-M;i++) {
+			//	if (mhat[i]!=m[i]) {
+			//		bits_err++;
+			//	}
+			//}
+			//cout<<"bits_err: "<<bits_err<<endl;
+		}
+
+		printf("-------------------------\n");
+		printf("Eb/No=%fdB:\n",Eb_No_dB);
+		printf("-------------------------\n");
+		//fprintf(fp,"-------------------------\n");
+		//fprintf(fp,"Eb/No=%fdB:\n",Eb_No_dB);
+		//fprintf(fp,"-------------------------\n");
+
+		for (i=0;i<MAXITER;i++) {
+			Ber=(double)bits_err[i]/(double)bits_all;
+			Fer=(double)frame_err[i]/(double)FRAME_NUM;
+			printf("Iteration:%d\n",i+1);
+			printf("---Ber=%f\n---Fer=%f\n",Ber,Fer);
+			//fprintf(fp,"Iteration:%d\n",i);
+			//fprintf(fp,"---Ber=%f\n---Fer=%f\n",Ber,Fer);
+		}
+	}
 
 	delete m;
 	delete x;
 	delete y;
 	delete mhat;
+
+	cudaFree(LastStateDevice);
+	cudaFree(NextStateDevice);
+	cudaFree(LastOutDevice);
+	cudaFree(NextOutDevice);
+	cudaFree(yDevice);
+	cudaFree(msgDevice);
+	cudaFree(imsgDevice);
+	cudaFree(mhatDevice);
+	cudaFree(parity0Device);
+	cudaFree(parity1Device);
+	cudaFree(tableDevice);
+	cudaFree(L_eDevice);
+	cudaFree(L_aDevice);
+	cudaFree(L_allDevice);
+	cudaFree(gammaAlphaDevice);
+	cudaFree(gammaBetaDevice);
+	cudaFree(AlphaDevice);
+	cudaFree(BetaDevice);
 
 	return 0;
 }
