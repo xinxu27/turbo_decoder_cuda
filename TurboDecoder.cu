@@ -25,6 +25,8 @@ using namespace std;
 #define RNMX (1.0-EPS)
 #define INIFINITY  1E+10
 
+#define MIN 1E-300
+
 //typedef enum __bool { false = 0, true = 1, } bool;
 
 long idum2;
@@ -130,7 +132,7 @@ long seed = 1234421;
 
 
 
-#define L_TOTAL 1024 // if u want to use block interleave,L_TOTAL must = x^2
+#define L_TOTAL 1024// if u want to use block interleave,L_TOTAL must = x^2
 #define M	2	// register length,=tail length
 #define NSTATE	4	// = M^2
 #define L_ALL 3*L_TOTAL	// coded frame length
@@ -188,8 +190,8 @@ static const char TailBit[NSTATE] = // tail info bits when trellis is terminatin
 {	0,1,1,0
 };
 
-#define MAXITER 4
-#define	FRAME_NUM 100
+#define MAXITER 5
+#define	FRAME_NUM 1000
 
 UINT m_Inter_table[L_TOTAL];
 
@@ -330,8 +332,8 @@ __global__ void gammaBeta(double * msg ,double * parity, double * L_a, double (*
     for (s0=0;s0<NSTATE;s0++) {
 		for (s2=0;s2<NSTATE;s2++)
 			gamma[tid][s0][s2]=-INIFINITY;
-		gamma[tid][s0][nextState[0][s0]]=-msg[tid]+parity[tid]*nextOut[0][s0]-log(1+exp(L_a[tid]));
-		gamma[tid][s0][nextState[1][s0]]=msg[tid]+parity[tid]*nextOut[1][s0]+L_a[tid]-log(1+exp(L_a[tid]));
+		gamma[tid][s0][nextState[0][s0]]=-msg[tid]+parity[tid]*nextOut[0][s0]-__logf(1+exp(L_a[tid]));
+		gamma[tid][s0][nextState[1][s0]]=msg[tid]+parity[tid]*nextOut[1][s0]+L_a[tid]-__logf(1+exp(L_a[tid]));
 		//gamma[tid][s0][nextState[0][s0]]=0.5;
 		//gamma[tid][s0][nextState[1][s0]]=-0.5;
     }
@@ -352,7 +354,7 @@ void computeAlpha(double (*AlphaHost)[4], double (*gamma)[4][4], double *maxBran
             for (s1=0;s1<NSTATE;s1++) {
                 sum+=exp(gamma[k-1][s2][s1]+AlphaHost[k-1][s1]);
 			}
-            if (sum<1E-300)
+            if (sum<MIN)
             //if (sum<=0.000000000000000000000000000001)
                 AlphaHost[k][s2]=-INIFINITY;
             else
@@ -389,7 +391,7 @@ void Beta(double (*BetaHost)[4], double (*gamma)[4][4], bool index, double * max
             sum = 0.0;
             for (s2=0;s2<NSTATE;s2++) 
                 sum += exp(gamma[k][s1][s2] + BetaHost[k+1][s2]);
-            if (sum<1E-300)
+            if (sum<MIN)
             //if (sum<=0.000000000000000000000000000001)
                 BetaHost[k][s1] = -INIFINITY;
             else 
@@ -435,7 +437,7 @@ __global__ void LLRS(double * msg, double * parity, double * L_a, double (*Alpha
         sum1+=exp(gamma1+Alpha[tid][lastState[1][s2]]+Beta[tid+1][s2]);
     }
     //L_all[tid]=log(sum1)-log(sum0);
-    L_all[tid]=logf(sum1)-logf(sum0);
+    L_all[tid]=log(sum1)-log(sum0);
 }
 
 __global__ void extrinsicInformation(double * L_all, double * msg, double * L_a, double * L_e) {
@@ -555,6 +557,11 @@ int main(int argc, char* argv[])
     cudaMalloc((void **)&AlphaDevice, (L_TOTAL+1)*sizeof(double)*4);
     cudaMalloc((void **)&BetaDevice, (L_TOTAL+1)*sizeof(double)*4);
 
+	//For Debug
+	//double L_aHost[L_TOTAL];
+	//double L_aHost1[L_TOTAL];
+	//double L_allHost[L_TOTAL];
+
     double gammaAlphaHost[L_TOTAL][4][4];
     double gammaBetaHost[L_TOTAL][4][4];
     double AlphaHost[L_TOTAL+1][4];
@@ -569,8 +576,9 @@ int main(int argc, char* argv[])
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	for (Eb_No_dB=-3.0;Eb_No_dB<5.0;Eb_No_dB+=0.5){
+	for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
 
+	//Eb_No_dB = 0.0;
 		No = 1/pow(10.0,Eb_No_dB/10.0);
 		bits_all = 0;
 		for (i =0; i<MAXITER;i++) {
@@ -619,6 +627,16 @@ int main(int argc, char* argv[])
 				LLRS<<<1,L_TOTAL>>>(msgDevice, parity0Device, L_aDevice, AlphaDevice, BetaDevice, L_allDevice,LastStateDevice, LastOutDevice);
 
 				extrinsicInformation<<<1, L_TOTAL>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
+				//if (iter >= 3) {
+				///debug
+				//exestimateInformationBits<<<1,L_TOTAL>>>(L_allDevice, mhatDevice, tableDevice); 
+
+				//cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
+				//countErrors(m, mhat, bits_err, frame_err, iter);
+				//debug
+				//cudaMemcpy(L_aHost1, L_aDevice, sizeof(double)*L_TOTAL, cudaMemcpyDeviceToHost);
+				//}
+
 				interLeave<<<1, L_TOTAL>>>(L_eDevice, L_aDevice, tableDevice);
 
 				gammaAlpha<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaAlphaDevice, LastStateDevice, LastOutDevice);
@@ -640,6 +658,9 @@ int main(int argc, char* argv[])
 
 				cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
 				countErrors(m, mhat, bits_err, frame_err, iter);
+
+				//debug
+				//cudaMemcpy(L_aHost, L_aDevice, sizeof(double)*L_TOTAL, cudaMemcpyDeviceToHost);
 			}
 			// estimate information bits
 			//exestimateInformationBits<<<1,L_TOTAL>>>(L_allDevice, mhatDevice, tableDevice); 
