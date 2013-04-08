@@ -131,8 +131,8 @@ bool boolrandom()
 		return false;
 }
 
-#define M	2	// register length,=tail length
-#define NSTATE	4	// = M^2
+#define M	3	// register length,=tail length
+#define NSTATE	8	// = M^2
 #define L_ALL 3*L_TOTAL	// coded frame length
 //#define DELTA 30	// SOVA window size. Make decision after 'delta' delay. Decide bit k when received bits
 					// for bit (k+delta) are processed. Trace back from (k+delta) to k. 
@@ -161,31 +161,31 @@ typedef int BOOL;
 
 // NextOut[bk][current state]
 static const char EnNextOut[2][NSTATE] = // check bit based on current and input bit
-{	0,0,1,1,
-	1,1,0,0
+{	0,0,1,1,1,1,0,0,
+	0,0,1,1,1,1,0,0
 };
 static const char NextOut[2][NSTATE] = // check bit based on current and input bit
-{	-1,-1,1,1,
-	1,1,-1,-1
+{	-1,-1,1,1,1,1,-1,-1,
+	-1,-1,1,1,1,1,-1,-1
 };
 // NextState[bk][current state]
 static const BYTE NextState[2][NSTATE] = // next state based on current and input bit
-{	0,2,3,1,
-	2,0,1,3
+{	0,4,5,1,2,6,7,3,
+	4,0,1,5,6,2,3,7
 };
 // LastOut[bk][current state]
 static const char LastOut[2][NSTATE] =	// trellis last check bit
-{	-1,1,-1,1,
-	1,-1,1,-1
+{	-1,1,1,-1,-1,1,1,-1,
+	-1,1,1,-1,-1,1,1,-1
 };
 // LastState[bk][current state]
 static const BYTE LastState[2][NSTATE] =	// last state lead to current state by input bk
-{	0,3,1,2,
-	1,2,0,3
+{	0,3,4,7,1,2,5,6,
+	1,2,5,6,0,3,4,7
 };
 // TailBit[current state]
 static const char TailBit[NSTATE] = // tail info bits when trellis is terminating
-{	0,1,1,0
+{	0,1,1,0,0,1,1,0
 };
 
 
@@ -299,18 +299,18 @@ void logmap(double *msg, double *parity, double *L_a,double *L_all, bool index)
 {
 	UINT nstate;
 	UINT s1,s2;
-	double (* Beta)[4];
-	double (*Alpha)[4];
+	double (* Beta)[8];
+	double (*Alpha)[8];
 	double * max_branch;
-	double gamma[4];
+	double gamma[8];
 	double sum,sum0,sum1;
 	double INIFINITY_ = 1E+10;	// approximate infinity value
 
 	INT k;
 
 	// alloc memory,
-	Beta = new double[L_TOTAL+1][4];
-	Alpha = new double[L_TOTAL+1][4];
+	Beta = new double[L_TOTAL+1][8];
+	Alpha = new double[L_TOTAL+1][8];
 	max_branch = new double[L_TOTAL+1];
 
 	nstate=NSTATE;
