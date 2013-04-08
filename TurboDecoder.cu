@@ -132,7 +132,7 @@ long seed = 1234421;
 
 
 
-#define L_TOTAL 1024// if u want to use block interleave,L_TOTAL must = x^2
+#define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
 #define M	3	// register length,=tail length
 #define NSTATE	8	// = M^2
 #define L_ALL 3*L_TOTAL	// coded frame length
@@ -192,7 +192,7 @@ static const char TailBit[NSTATE] = // tail info bits when trellis is terminatin
 
 
 #define MAXITER 5
-#define	FRAME_NUM 100
+#define	FRAME_NUM 10
 
 UINT m_Inter_table[L_TOTAL];
 
@@ -340,6 +340,76 @@ __global__ void gammaBeta(double * msg ,double * parity, double * L_a, double (*
     }
 }
 
+__global__ void Alpha(double (*Alpha)[8], double (*gamma)[8][8]) {
+	const int tid = threadIdx.x;
+
+	UINT k, s1, s2;
+	double sum;
+
+	if (tid == 0) {
+		Alpha[0][0] = 0;
+		for (s1=1;s1<NSTATE;s1++)
+			Alpha[0][s1]=-INIFINITY;
+	}
+	else {
+		for (s1=0;s1<NSTATE;s1++)
+			Alpha[tid*1024][s1]=0;
+	}
+
+	for (k=1; k<=L_TOTAL; k++) {
+	//for (k=tid*1024+1; k<(tid*1024+1024); k++) {
+        for (s2=0;s2<NSTATE;s2++){
+            sum = 0.0;
+            for (s1=0;s1<NSTATE;s1++) {
+                sum+=exp(gamma[k-1][s2][s1]+Alpha[k-1][s1]);
+			}
+            if (sum<MIN)
+            //if (sum<=0.000000000000000000000000000001)
+                Alpha[k][s2]=-INIFINITY;
+            else
+                Alpha[k][s2]=log(sum);
+        }
+	}
+
+}
+
+__global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index) {
+	const int tid = threadIdx.x;
+
+	UINT k, s1, s2;
+	double sum;
+
+	//if (tid == 5) {
+		if (index){// true -- terminated,false -- open
+        Beta[L_TOTAL][0]=0;
+        for (s2=1;s2<NSTATE;s2++)
+            Beta[L_TOTAL][s2]=-INIFINITY;
+		}
+		else 
+			for (s2=0;s2<NSTATE;s2++)
+				Beta[L_TOTAL][s2]=0;
+	//}
+	//else {
+	//	for (s2=0; s2<NSTATE; s2++)
+	//		Beta[(tid+1)*1024][s2]=0;
+	//}
+
+    //for (k=(tid+1)*1024;k>(tid*1024);k--) {
+    for (k=L_TOTAL;k>0;k--) {
+
+        for (s1=0;s1<NSTATE;s1++) {
+            sum = 0.0;
+            for (s2=0;s2<NSTATE;s2++) 
+                sum += exp(gamma[k][s1][s2] + Beta[k+1][s2]);
+            if (sum<MIN)
+            //if (sum<=0.000000000000000000000000000001)
+                Beta[k][s1] = -INIFINITY;
+            else 
+                Beta[k][s1] = log(sum);
+        }
+	}
+}
+
 void computeAlpha(double (*AlphaHost)[8], double (*gamma)[8][8], double *maxBranch) {
     // initialize Alpha & Beta
     AlphaHost[0][0]=0;
@@ -373,7 +443,7 @@ void computeAlpha(double (*AlphaHost)[8], double (*gamma)[8][8], double *maxBran
     }
 }
 
-void Beta(double (*BetaHost)[8], double (*gamma)[8][8], bool index, double * maxBranch){
+void computeBeta(double (*BetaHost)[8], double (*gamma)[8][8], bool index, double * maxBranch){
     // initialize Beta
 	UINT s1,k,s2;
 	double sum;
@@ -577,7 +647,7 @@ int main(int argc, char* argv[])
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
+	for (Eb_No_dB= 0.0;Eb_No_dB<5.0;Eb_No_dB+=0.5){
 
 	//Eb_No_dB = 0.0;
 		No = 1/pow(10.0,Eb_No_dB/10.0);
@@ -616,14 +686,17 @@ int main(int argc, char* argv[])
 
 				gammaAlpha<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaAlphaDevice,LastStateDevice, LastOutDevice);
 				gammaBeta<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
+				//Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice);
+				//Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,true);
+				//cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
 				cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 				cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 
 				computeAlpha(AlphaHost, gammaAlphaHost, max_branch);
-				Beta(BetaHost, gammaBetaHost, true,max_branch);
+				computeBeta(BetaHost, gammaBetaHost, true,max_branch);
 				cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
 				cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
-			//	normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
+				//normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
 
 				LLRS<<<1,L_TOTAL>>>(msgDevice, parity0Device, L_aDevice, AlphaDevice, BetaDevice, L_allDevice,LastStateDevice, LastOutDevice);
 
@@ -642,14 +715,16 @@ int main(int argc, char* argv[])
 
 				gammaAlpha<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaAlphaDevice, LastStateDevice, LastOutDevice);
 				gammaBeta<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-				cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
-				cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
+				Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice);
+				Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,false);
+				//cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
+				//cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 
-				computeAlpha(AlphaHost, gammaAlphaHost, max_branch);
-				Beta(BetaHost, gammaBetaHost, false, max_branch);
-				cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
-				cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
-			//	normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
+				//computeAlpha(AlphaHost, gammaAlphaHost, max_branch);
+				//Beta(BetaHost, gammaBetaHost, false, max_branch);
+				//cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
+				//cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
+				normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
 
 				LLRS<<<1,L_TOTAL>>>(imsgDevice, parity1Device, L_aDevice, AlphaDevice, BetaDevice, L_allDevice, LastStateDevice,LastOutDevice);
 
