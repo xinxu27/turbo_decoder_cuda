@@ -33,7 +33,7 @@ long seed = 1234421;
 
 #define L_TOTAL 1024	// if u want to use block interleave,L_TOTAL must = x^2
 #define MAXITER 5
-#define	FRAME_NUM 100
+#define	FRAME_NUM 1000
 
 long idum2;
 long idum;
@@ -521,7 +521,7 @@ int main(int argc, char* argv[])
 	//initInter_table();
 	init_Block_interleave_table();	// block interleave
 
-	for (Eb_No_dB=-3.0;Eb_No_dB<5.0;Eb_No_dB+=0.5)
+	for (Eb_No_dB=-3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1)
 	{
 		// dB = 10*log(Eb/No) where Eb is 1
 		No = 1/pow(10.0,Eb_No_dB/10.0);
