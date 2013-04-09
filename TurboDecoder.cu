@@ -192,7 +192,7 @@ static const char TailBit[NSTATE] = // tail info bits when trellis is terminatin
 
 
 #define MAXITER 5
-#define	FRAME_NUM 10
+#define	FRAME_NUM 100
 
 UINT m_Inter_table[L_TOTAL];
 
@@ -340,7 +340,7 @@ __global__ void gammaBeta(double * msg ,double * parity, double * L_a, double (*
     }
 }
 
-__global__ void Alpha(double (*Alpha)[8], double (*gamma)[8][8]) {
+__global__ void Alpha(double (*Alpha)[8], double (*gamma)[8][8], double *maxBranch) {
 	const int tid = threadIdx.x;
 
 	UINT k, s1, s2;
@@ -369,11 +369,20 @@ __global__ void Alpha(double (*Alpha)[8], double (*gamma)[8][8]) {
             else
                 Alpha[k][s2]=log(sum);
         }
+
+		// normalization,prevent overflow
+		maxBranch[k]=Alpha[k][0];
+		for (s2=1;s2<NSTATE;s2++)
+			if (Alpha[k][s2]>maxBranch[k])
+				maxBranch[k]=Alpha[k][s2];
+
+		for (s2=0;s2<NSTATE;s2++)
+			Alpha[k][s2]=Alpha[k][s2]-maxBranch[k];
 	}
 
 }
 
-__global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index) {
+__global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index, double* maxBranch) {
 	const int tid = threadIdx.x;
 
 	UINT k, s1, s2;
@@ -407,6 +416,10 @@ __global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index) {
             else 
                 Beta[k][s1] = log(sum);
         }
+
+		// normalization,prevent overflow
+		for (s2=0;s2<NSTATE;s2++)
+			Beta[k][s2]=Beta[k][s2]-maxBranch[k];
 	}
 }
 
@@ -607,6 +620,7 @@ int main(int argc, char* argv[])
 	double (*gammaBetaDevice)[8][8];
 	double (*AlphaDevice)[8];
 	double (*BetaDevice)[8];
+	double *maxBranchDevice;
 
     cudaMalloc((void **)&LastStateDevice, 2*8*sizeof(BYTE));
     cudaMalloc((void **)&NextStateDevice, 2*8*sizeof(BYTE));
@@ -627,6 +641,7 @@ int main(int argc, char* argv[])
     cudaMalloc((void **)&gammaBetaDevice, L_TOTAL*sizeof(double)*8*8);
     cudaMalloc((void **)&AlphaDevice, (L_TOTAL+1)*sizeof(double)*8);
     cudaMalloc((void **)&BetaDevice, (L_TOTAL+1)*sizeof(double)*8);
+    cudaMalloc((void **)&maxBranchDevice, (L_TOTAL+1)*sizeof(double));
 
 	//For Debug
 	//double L_aHost[L_TOTAL];
@@ -647,7 +662,7 @@ int main(int argc, char* argv[])
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	for (Eb_No_dB= 0.0;Eb_No_dB<5.0;Eb_No_dB+=0.5){
+	for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
 
 	//Eb_No_dB = 0.0;
 		No = 1/pow(10.0,Eb_No_dB/10.0);
@@ -686,10 +701,10 @@ int main(int argc, char* argv[])
 
 				gammaAlpha<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaAlphaDevice,LastStateDevice, LastOutDevice);
 				gammaBeta<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-				Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice);
-				Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,true);
+				Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
+				Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,true, maxBranchDevice);
 				cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
-				//cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
+				cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 
 				//computeAlpha(AlphaHost, gammaAlphaHost, max_branch);
@@ -716,8 +731,8 @@ int main(int argc, char* argv[])
 
 				gammaAlpha<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaAlphaDevice, LastStateDevice, LastOutDevice);
 				gammaBeta<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-				Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice);
-				Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,false);
+				Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
+				Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,false, maxBranchDevice);
 				cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
