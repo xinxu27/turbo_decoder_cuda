@@ -132,7 +132,7 @@ long seed = 1234421;
 
 
 
-#define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
+#define L_TOTAL 1024  // if u want to use block interleave,L_TOTAL must = x^2
 #define M	3	// register length,=tail length
 #define NSTATE	8	// = M^2
 #define L_ALL 3*L_TOTAL	// coded frame length
@@ -333,8 +333,8 @@ __global__ void gammaBeta(double * msg ,double * parity, double * L_a, double (*
     for (s0=0;s0<NSTATE;s0++) {
 		for (s2=0;s2<NSTATE;s2++)
 			gamma[tid][s0][s2]=-INIFINITY;
-		gamma[tid][s0][nextState[0][s0]]=-msg[tid]+parity[tid]*nextOut[0][s0]-__logf(1+exp(L_a[tid]));
-		gamma[tid][s0][nextState[1][s0]]=msg[tid]+parity[tid]*nextOut[1][s0]+L_a[tid]-__logf(1+exp(L_a[tid]));
+		gamma[tid][s0][nextState[0][s0]]=-msg[tid]+parity[tid]*nextOut[0][s0]-log(1+exp(L_a[tid]));
+		gamma[tid][s0][nextState[1][s0]]=msg[tid]+parity[tid]*nextOut[1][s0]+L_a[tid]-log(1+exp(L_a[tid]));
 		//gamma[tid][s0][nextState[0][s0]]=0.5;
 		//gamma[tid][s0][nextState[1][s0]]=-0.5;
     }
@@ -346,15 +346,15 @@ __global__ void Alpha(double (*Alpha)[8], double (*gamma)[8][8]) {
 	UINT k, s1, s2;
 	double sum;
 
-	if (tid == 0) {
-		Alpha[0][0] = 0;
+//	if (tid == 0) {
+		Alpha[0][0] = 0.0;
 		for (s1=1;s1<NSTATE;s1++)
 			Alpha[0][s1]=-INIFINITY;
-	}
-	else {
-		for (s1=0;s1<NSTATE;s1++)
-			Alpha[tid*1024][s1]=0;
-	}
+//	}
+//	else {
+//		for (s1=0;s1<NSTATE;s1++)
+//			Alpha[tid*1024][s1]=0;
+//	}
 
 	for (k=1; k<=L_TOTAL; k++) {
 	//for (k=tid*1024+1; k<(tid*1024+1024); k++) {
@@ -381,7 +381,7 @@ __global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index) {
 
 	//if (tid == 5) {
 		if (index){// true -- terminated,false -- open
-        Beta[L_TOTAL][0]=0;
+        Beta[L_TOTAL][0]=0.0;
         for (s2=1;s2<NSTATE;s2++)
             Beta[L_TOTAL][s2]=-INIFINITY;
 		}
@@ -395,7 +395,7 @@ __global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index) {
 	//}
 
     //for (k=(tid+1)*1024;k>(tid*1024);k--) {
-    for (k=L_TOTAL;k>0;k--) {
+    for (k=L_TOTAL-1;k>0;k--) {
 
         for (s1=0;s1<NSTATE;s1++) {
             sum = 0.0;
@@ -686,17 +686,18 @@ int main(int argc, char* argv[])
 
 				gammaAlpha<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaAlphaDevice,LastStateDevice, LastOutDevice);
 				gammaBeta<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-				//Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice);
-				//Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,true);
-				//cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
-				cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
-				cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
+				Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice);
+				Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,true);
+				cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
+				//cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
+				//cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 
-				computeAlpha(AlphaHost, gammaAlphaHost, max_branch);
-				computeBeta(BetaHost, gammaBetaHost, true,max_branch);
-				cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
-				cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
-				//normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
+				//computeAlpha(AlphaHost, gammaAlphaHost, max_branch);
+				//computeBeta(BetaHost, gammaBetaHost, true,max_branch);
+				//cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
+				//cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
+				normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
+				cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
 
 				LLRS<<<1,L_TOTAL>>>(msgDevice, parity0Device, L_aDevice, AlphaDevice, BetaDevice, L_allDevice,LastStateDevice, LastOutDevice);
 
@@ -717,6 +718,7 @@ int main(int argc, char* argv[])
 				gammaBeta<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
 				Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice);
 				Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,false);
+				cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 
@@ -725,6 +727,7 @@ int main(int argc, char* argv[])
 				//cudaMemcpy(AlphaDevice, AlphaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
 				//cudaMemcpy(BetaDevice, BetaHost, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyHostToDevice);
 				normalizationAlphaAndBeta<<<1,L_TOTAL>>>(AlphaDevice, BetaDevice);
+				cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
 
 				LLRS<<<1,L_TOTAL>>>(imsgDevice, parity1Device, L_aDevice, AlphaDevice, BetaDevice, L_allDevice, LastStateDevice,LastOutDevice);
 
