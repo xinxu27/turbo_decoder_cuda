@@ -26,6 +26,9 @@ using namespace std;
 #define INIFINITY  1E+10
 
 #define MIN 1E-300
+#define L_TOTAL 1024 // if u want to use block interleave,L_TOTAL must = x^2
+#define MAXITER 5
+#define	FRAME_NUM 100
 
 //typedef enum __bool { false = 0, true = 1, } bool;
 
@@ -132,7 +135,6 @@ long seed = 1234421;
 
 
 
-#define L_TOTAL 1024  // if u want to use block interleave,L_TOTAL must = x^2
 #define M	3	// register length,=tail length
 #define NSTATE	8	// = M^2
 #define L_ALL 3*L_TOTAL	// coded frame length
@@ -191,8 +193,6 @@ static const char TailBit[NSTATE] = // tail info bits when trellis is terminatin
 };
 
 
-#define MAXITER 5
-#define	FRAME_NUM 100
 
 UINT m_Inter_table[L_TOTAL];
 
@@ -662,7 +662,7 @@ int main(int argc, char* argv[])
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
+	for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1){
 
 	//Eb_No_dB = 0.0;
 		No = 1/pow(10.0,Eb_No_dB/10.0);
