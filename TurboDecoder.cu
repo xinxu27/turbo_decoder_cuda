@@ -26,9 +26,10 @@ using namespace std;
 #define INIFINITY  1E+10
 
 #define MIN 1E-300
-#define L_TOTAL 1024 // if u want to use block interleave,L_TOTAL must = x^2
-#define MAXITER 5
-#define	FRAME_NUM 100
+#define L_TOTAL 1024// if u want to use block interleave,L_TOTAL must = x^2
+#define MAXITER 10
+#define	FRAME_NUM 10
+#define AlphaBetaTHREAD_NUM 4
 
 //typedef enum __bool { false = 0, true = 1, } bool;
 
@@ -346,18 +347,18 @@ __global__ void Alpha(double (*Alpha)[8], double (*gamma)[8][8], double *maxBran
 	UINT k, s1, s2;
 	double sum;
 
-//	if (tid == 0) {
+	if (tid == 0) {
 		Alpha[0][0] = 0.0;
 		for (s1=1;s1<NSTATE;s1++)
 			Alpha[0][s1]=-INIFINITY;
-//	}
-//	else {
-//		for (s1=0;s1<NSTATE;s1++)
-//			Alpha[tid*1024][s1]=0;
-//	}
+	}
+	else {
+		for (s1=0;s1<NSTATE;s1++)
+			Alpha[tid*(L_TOTAL/AlphaBetaTHREAD_NUM)][s1]=0;
+	}
 
-	for (k=1; k<=L_TOTAL; k++) {
-	//for (k=tid*1024+1; k<(tid*1024+1024); k++) {
+	//for (k=1; k<=L_TOTAL; k++) {
+	for (k=tid*L_TOTAL/AlphaBetaTHREAD_NUM+1; k<(tid*L_TOTAL/AlphaBetaTHREAD_NUM+L_TOTAL/AlphaBetaTHREAD_NUM); k++) {
         for (s2=0;s2<NSTATE;s2++){
             sum = 0.0;
             for (s1=0;s1<NSTATE;s1++) {
@@ -388,7 +389,7 @@ __global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index, doubl
 	UINT k, s1, s2;
 	double sum;
 
-	//if (tid == 5) {
+	if (tid == (AlphaBetaTHREAD_NUM-1)) {
 		if (index){// true -- terminated,false -- open
         Beta[L_TOTAL][0]=0.0;
         for (s2=1;s2<NSTATE;s2++)
@@ -397,14 +398,14 @@ __global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index, doubl
 		else 
 			for (s2=0;s2<NSTATE;s2++)
 				Beta[L_TOTAL][s2]=0;
-	//}
-	//else {
-	//	for (s2=0; s2<NSTATE; s2++)
-	//		Beta[(tid+1)*1024][s2]=0;
-	//}
+	}
+	else {
+		for (s2=0; s2<NSTATE; s2++)
+			Beta[(tid+1)*L_TOTAL/AlphaBetaTHREAD_NUM][s2]=0;
+	}
 
-    //for (k=(tid+1)*1024;k>(tid*1024);k--) {
-    for (k=L_TOTAL-1;k>0;k--) {
+    for (k=(tid+1)*L_TOTAL/AlphaBetaTHREAD_NUM-1;k>(tid*L_TOTAL/AlphaBetaTHREAD_NUM);k--) {
+   // for (k=L_TOTAL-1;k>0;k--) {
 
         for (s1=0;s1<NSTATE;s1++) {
             sum = 0.0;
@@ -701,8 +702,8 @@ int main(int argc, char* argv[])
 
 				gammaAlpha<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaAlphaDevice,LastStateDevice, LastOutDevice);
 				gammaBeta<<<1,L_TOTAL>>>(msgDevice , parity0Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-				Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
-				Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,true, maxBranchDevice);
+				Alpha<<<1,AlphaBetaTHREAD_NUM>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
+				Beta<<<1,AlphaBetaTHREAD_NUM>>>(BetaDevice, gammaBetaDevice,true, maxBranchDevice);
 				cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
 				cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
@@ -731,8 +732,8 @@ int main(int argc, char* argv[])
 
 				gammaAlpha<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaAlphaDevice, LastStateDevice, LastOutDevice);
 				gammaBeta<<<1,L_TOTAL>>>(imsgDevice , parity1Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-				Alpha<<<1,1>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
-				Beta<<<1,1>>>(BetaDevice, gammaBetaDevice,false, maxBranchDevice);
+				Alpha<<<1,AlphaBetaTHREAD_NUM>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
+				Beta<<<1,AlphaBetaTHREAD_NUM>>>(BetaDevice, gammaBetaDevice,false, maxBranchDevice);
 				cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
