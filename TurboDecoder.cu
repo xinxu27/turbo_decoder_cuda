@@ -26,13 +26,13 @@ using namespace std;
 #define INIFINITY  1E+10
 
 #define MIN 1E-300
-#define L_TOTAL 4096// if u want to use block interleave,L_TOTAL must = x^2
-#define MAXITER 10
-#define	FRAME_NUM 100
-#define AlphaBetaBLOCK_NUM 4
-#define AlphaBetaTHREAD_NUM 2
+#define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
+#define MAXITER 5
+#define	FRAME_NUM 10
+#define AlphaBetaBLOCK_NUM 8
+#define AlphaBetaTHREAD_NUM 8
 
-#define THREAD_NUM 512
+#define THREAD_NUM 768
 #define BLOCK_NUM 8
 typedef unsigned char BYTE;
 typedef int INT;
@@ -41,7 +41,7 @@ typedef int BOOL;
 
 //UINT m_Inter_table[L_TOTAL] ; 
 //Lte 6144 bits interleave table
-/*UINT m_Inter_table[L_TOTAL] = 
+UINT m_Inter_table[L_TOTAL] = 
     {0,743,2446,5109,2588,1027,426,785,2104,4383,
 1478,5677,4692,4667,5602,1353,4208,1879,510,101,
 652,2163,4634,1921,168,5519,5686,669,2756,5803,
@@ -657,7 +657,7 @@ typedef int BOOL;
 5976,2111,5350,3405,2420,2395,3330,5225,1936,5751,
 4382,3973,4524,6035,2362,5793,4040,3247,3414,4541,
 484,3531,1394,217};
-*/
+
 UINT LTE_Inter_table[L_TOTAL][3] =
 	{40,3,10,	48,7,12,    56,19,42,	64,7,16,    72,7,18,    80,11,20,   
     88,5,22,    96,11,24,   104,7,26,   112,41,84,  120,103,90, 128,15,32,  
@@ -824,11 +824,11 @@ long seed = 1234421;
 // NextOut[bk][current state]
 static const char EnNextOut[2][NSTATE] = // check bit based on current and input bit
 {	0,0,1,1,1,1,0,0,
-	0,0,1,1,1,1,0,0
+	1,1,0,0,0,0,1,1
 };
 static const char NextOut[2][NSTATE] = // check bit based on current and input bit
 {	-1,-1,1,1,1,1,-1,-1,
-	-1,-1,1,1,1,1,-1,-1
+	1,1,-1,-1,-1,-1,1,1
 };
 // NextState[bk][current state]
 static const BYTE NextState[2][NSTATE] = // next state based on current and input bit
@@ -838,7 +838,7 @@ static const BYTE NextState[2][NSTATE] = // next state based on current and inpu
 // LastOut[bk][current state]
 static const char LastOut[2][NSTATE] =	// trellis last check bit
 {	-1,1,1,-1,-1,1,1,-1,
-	-1,1,1,-1,-1,1,1,-1
+	1,-1,-1,1,1,-1,-1,1
 };
 // LastState[bk][current state]
 static const BYTE LastState[2][NSTATE] =	// last state lead to current state by input bk
@@ -853,7 +853,7 @@ static const char TailBit[NSTATE] = // tail info bits when trellis is terminatin
 
 
 //Lte 4096 bits interleave table
-UINT m_Inter_table[L_TOTAL] = 
+/*UINT m_Inter_table[L_TOTAL] = 
 {0,95,318,669,1148,1755,2490,3353,248,1367,
 2614,3989,1396,3027,690,2577,496,2639,814,3213,
 1644,203,2986,1801,744,3911,3110,2437,1892,1475,
@@ -1264,6 +1264,7 @@ UINT m_Inter_table[L_TOTAL] =
 1498,2361,3352,375,1622,2997,404,2035,3794,1585,
 3600,1647,3918,2221,652,3307,1994,809,3848,2919,
 2118,1445,900,483,194,33};
+*/
 
 
 
@@ -1732,8 +1733,8 @@ int main(int argc, char* argv[])
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	//for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
-	for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
+	for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
+	//for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
 
 	//Eb_No_dB = 0.0;
 		No = 1/pow(10.0,Eb_No_dB/10.0);
