@@ -26,12 +26,13 @@ using namespace std;
 #define INIFINITY  1E+10
 
 #define MIN 1E-300
-#define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
+#define L_TOTAL 4096// if u want to use block interleave,L_TOTAL must = x^2
 #define MAXITER 10
-#define	FRAME_NUM 10
-#define AlphaBetaTHREAD_NUM 4
+#define	FRAME_NUM 100
+#define AlphaBetaBLOCK_NUM 4
+#define AlphaBetaTHREAD_NUM 2
 
-#define THREAD_NUM 768
+#define THREAD_NUM 512
 #define BLOCK_NUM 8
 typedef unsigned char BYTE;
 typedef int INT;
@@ -39,7 +40,8 @@ typedef unsigned int UINT;
 typedef int BOOL;
 
 //UINT m_Inter_table[L_TOTAL] ; 
-UINT m_Inter_table[L_TOTAL] = 
+//Lte 6144 bits interleave table
+/*UINT m_Inter_table[L_TOTAL] = 
     {0,743,2446,5109,2588,1027,426,785,2104,4383,
 1478,5677,4692,4667,5602,1353,4208,1879,510,101,
 652,2163,4634,1921,168,5519,5686,669,2756,5803,
@@ -655,7 +657,7 @@ UINT m_Inter_table[L_TOTAL] =
 5976,2111,5350,3405,2420,2395,3330,5225,1936,5751,
 4382,3973,4524,6035,2362,5793,4040,3247,3414,4541,
 484,3531,1394,217};
-
+*/
 UINT LTE_Inter_table[L_TOTAL][3] =
 	{40,3,10,	48,7,12,    56,19,42,	64,7,16,    72,7,18,    80,11,20,   
     88,5,22,    96,11,24,   104,7,26,   112,41,84,  120,103,90, 128,15,32,  
@@ -850,7 +852,8 @@ static const char TailBit[NSTATE] = // tail info bits when trellis is terminatin
 
 
 
-/*UINT m_Inter_table[L_TOTAL] = 
+//Lte 4096 bits interleave table
+UINT m_Inter_table[L_TOTAL] = 
 {0,95,318,669,1148,1755,2490,3353,248,1367,
 2614,3989,1396,3027,690,2577,496,2639,814,3213,
 1644,203,2986,1801,744,3911,3110,2437,1892,1475,
@@ -1261,7 +1264,7 @@ static const char TailBit[NSTATE] = // tail info bits when trellis is terminatin
 1498,2361,3352,375,1622,2997,404,2035,3794,1585,
 3600,1647,3918,2221,652,3307,1994,809,3848,2919,
 2118,1445,900,483,194,33};
-*/
+
 
 
 
@@ -1420,11 +1423,11 @@ __global__ void Alpha(double (*Alpha)[8], double (*gamma)[8][8], double *maxBran
 	}
 	else {
 		for (s1=0;s1<NSTATE;s1++)
-			Alpha[tid*(L_TOTAL/AlphaBetaTHREAD_NUM)][s1]=0;
+			Alpha[tid*(L_TOTAL/(AlphaBetaTHREAD_NUM*AlphaBetaBLOCK_NUM))][s1]=0;
 	}
 
 	//for (k=1; k<=L_TOTAL; k++) {
-	for (k=tid*L_TOTAL/AlphaBetaTHREAD_NUM+1; k<(tid*L_TOTAL/AlphaBetaTHREAD_NUM+L_TOTAL/AlphaBetaTHREAD_NUM); k++) {
+	for (k=tid*L_TOTAL/(AlphaBetaTHREAD_NUM*AlphaBetaBLOCK_NUM)+1; k<(tid*L_TOTAL/(AlphaBetaTHREAD_NUM*AlphaBetaBLOCK_NUM)+L_TOTAL/(AlphaBetaTHREAD_NUM*AlphaBetaBLOCK_NUM)); k++) {
         for (s2=0;s2<NSTATE;s2++){
             sum = 0.0;
             for (s1=0;s1<NSTATE;s1++) {
@@ -1455,7 +1458,7 @@ __global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index, doubl
 	UINT k, s1, s2;
 	double sum;
 
-	if (tid == (AlphaBetaTHREAD_NUM-1)) {
+	if (tid == (AlphaBetaTHREAD_NUM*AlphaBetaBLOCK_NUM-1)) {
 		if (index){// true -- terminated,false -- open
         Beta[L_TOTAL][0]=0.0;
         for (s2=1;s2<NSTATE;s2++)
@@ -1467,10 +1470,10 @@ __global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index, doubl
 	}
 	else {
 		for (s2=0; s2<NSTATE; s2++)
-			Beta[(tid+1)*L_TOTAL/AlphaBetaTHREAD_NUM][s2]=0;
+			Beta[(tid+1)*L_TOTAL/(AlphaBetaTHREAD_NUM*AlphaBetaBLOCK_NUM)][s2]=0;
 	}
 
-    for (k=(tid+1)*L_TOTAL/AlphaBetaTHREAD_NUM-1;k>(tid*L_TOTAL/AlphaBetaTHREAD_NUM);k--) {
+    for (k=(tid+1)*L_TOTAL/(AlphaBetaTHREAD_NUM*AlphaBetaBLOCK_NUM)-1;k>(tid*L_TOTAL/(AlphaBetaTHREAD_NUM*AlphaBetaBLOCK_NUM));k--) {
    // for (k=L_TOTAL-1;k>0;k--) {
 
         for (s1=0;s1<NSTATE;s1++) {
@@ -1729,7 +1732,8 @@ int main(int argc, char* argv[])
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	for (Eb_No_dB= 0.0;Eb_No_dB<3.0;Eb_No_dB+=0.5){
+	//for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
+	for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
 
 	//Eb_No_dB = 0.0;
 		No = 1/pow(10.0,Eb_No_dB/10.0);
@@ -1768,8 +1772,8 @@ int main(int argc, char* argv[])
 
 				gammaAlpha<<<BLOCK_NUM,THREAD_NUM>>>(msgDevice , parity0Device,  L_aDevice,  gammaAlphaDevice,LastStateDevice, LastOutDevice);
 				gammaBeta<<<BLOCK_NUM,THREAD_NUM>>>(msgDevice , parity0Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-				Alpha<<<1,AlphaBetaTHREAD_NUM>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
-				Beta<<<1,AlphaBetaTHREAD_NUM>>>(BetaDevice, gammaBetaDevice,true, maxBranchDevice);
+				Alpha<<<AlphaBetaBLOCK_NUM,AlphaBetaTHREAD_NUM>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
+				Beta<<<AlphaBetaBLOCK_NUM,AlphaBetaTHREAD_NUM>>>(BetaDevice, gammaBetaDevice,true, maxBranchDevice);
 				//cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
@@ -1798,8 +1802,8 @@ int main(int argc, char* argv[])
 
 				gammaAlpha<<<BLOCK_NUM,THREAD_NUM>>>(imsgDevice , parity1Device,  L_aDevice,  gammaAlphaDevice, LastStateDevice, LastOutDevice);
 				gammaBeta<<<BLOCK_NUM,THREAD_NUM>>>(imsgDevice , parity1Device,  L_aDevice,  gammaBetaDevice, NextStateDevice, NextOutDevice);
-				Alpha<<<1,AlphaBetaTHREAD_NUM>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
-				Beta<<<1,AlphaBetaTHREAD_NUM>>>(BetaDevice, gammaBetaDevice,false, maxBranchDevice);
+				Alpha<<<AlphaBetaBLOCK_NUM,AlphaBetaTHREAD_NUM>>>(AlphaDevice, gammaAlphaDevice, maxBranchDevice);
+				Beta<<<AlphaBetaBLOCK_NUM,AlphaBetaTHREAD_NUM>>>(BetaDevice, gammaBetaDevice,false, maxBranchDevice);
 				//cudaMemcpy(AlphaHost, AlphaDevice, sizeof(double)*(L_TOTAL+1)*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaAlphaHost, gammaAlphaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
 				//cudaMemcpy(gammaBetaHost, gammaBetaDevice, sizeof(double)*L_TOTAL*8*8, cudaMemcpyDeviceToHost);
