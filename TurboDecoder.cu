@@ -26,13 +26,13 @@
 using namespace std;
 
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
-#define MAXITER 3
-#define	FRAME_NUM 100
+#define MAXITER 10
+#define	FRAME_NUM 10
 #define AlphaBetaBLOCK_NUM 8
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 64
+#define BLOCK_NUM 64 
 #define L_BLOCK L_TOTAL/BLOCK_NUM
 
 #define LEAVER_BLOCK 8
@@ -662,6 +662,7 @@ UINT m_Inter_table[L_TOTAL] =
 4382,3973,4524,6035,2362,5793,4040,3247,3414,4541,
 484,3531,1394,217};
 
+
 long idum2;
 long idum;
 long iy;
@@ -676,11 +677,11 @@ value that is less than 1.
 --
 */
 
-double ran2()
+float ran2()
 {
 	int j;
 	long k;
-	double temp;
+	float temp;
 	
 	k=(idum)/IQ1;
 	idum=IA1*(idum-k*IQ1)-k*IR1;  // Compute idum=(IA1*idum) % IM1 without overflows by Schrage's method.
@@ -730,24 +731,24 @@ void initRandom(long seed)
 }
 
 
-double doublerandom()
+float floatrandom()
 {
-	double t = ran2();
+	float t = ran2();
 	return t;
 }
 
 long longrandom(long range)
 {
-	double t;
+	float t;
 	
-	t = doublerandom();
-	return((long)(t*(double)range));
+	t = floatrandom();
+	return((long)(t*(float)range));
 }
 
 
 bool boolrandom()
 {
-	double t=doublerandom();
+	float t=floatrandom();
 	
 	if (t>0.5)
 		return true;
@@ -1226,18 +1227,18 @@ static const char TailBit[NSTATE] = // tail info bits when trellis is terminatin
 
 
 
-double gaussian(double variance)
+float gaussian(float variance)
 {
 	// static becuase we don't want to have it initialized each time we go in
-	double returnvalue=0;
-	double k;
+	float returnvalue=0;
+	float k;
 	
 	k = sqrt(variance/2.0);
 	
 	// add 24 uniform RV to obtain a simulation of normality
     int x;
 	for (x=0;x<24;x++)
-		returnvalue += doublerandom();
+		returnvalue += floatrandom();
 	
 	return k*(returnvalue-0.5*24);
 
@@ -1330,7 +1331,7 @@ void encode(BYTE *msg, BYTE *stream, bool puncture)
 //////////////////////////////////////////////////////////////////////
 // LogMAP component decoder
 //////////////////////////////////////////////////////////////////////
-__global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, bool index, bool decoder2)
+__global__ void logmap(float *msg, float *parity, float *L_a,float *L_all, bool index, bool decoder2)
 {
 
     const char NextOut[2][NSTATE] = // check bit based on current and input bit
@@ -1358,20 +1359,21 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
     const unsigned int thread = threadIdx.x;
 
 	UINT s1,s2;
-	double gamma[8];
-    double sum;
+	float gamma[8];
+    float sum;
 
 	INT k;
 
 	// alloc memory,
-	__shared__ double Alpha[L_BLOCK][8];
-	__shared__ double Beta[L_BLOCK][8];
-	__shared__ double sum0[8];
-	__shared__ double sum1[8];
+	__shared__ float Alpha[L_BLOCK][8];
+	__shared__ float Beta[8];
+	__shared__ float sum0[8];
+	__shared__ float sum1[8];
 
-	__shared__ double max_branch[L_BLOCK];
+	float max_branch[L_BLOCK];
     
-    //double L_e[L_BLOCK];
+	//__shared__ float max_branch[L_BLOCK];
+    //float L_e[L_BLOCK];
 
 	// initialize Alpha & Beta
 	if (block == 0 && thread != 0) {
@@ -1381,10 +1383,10 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 			Alpha[0][thread]=0;
 	}
 
-    if (index && block == BLOCK_NUM - 1 && thread != 0)
-        Beta[L_BLOCK-1][thread] = -INIFINITY;
-    else
-        Beta[L_BLOCK-1][thread] = 0;
+    //if (index && block == BLOCK_NUM - 1 && thread != 0)
+     //   Beta[L_BLOCK-1][thread] = -INIFINITY;
+    //else
+     //   Beta[L_BLOCK-1][thread] = 0;
 
 	// forward recursion,compute Alpha 
 	for (k=1;k<L_BLOCK;k++)
@@ -1394,77 +1396,133 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
         for (s1=0;s1<NSTATE;s1++)
             gamma[s1]=-INIFINITY;
         gamma[LastState[0][thread]]=-msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[0][thread]
-            -log(1+exp(L_a[block*L_BLOCK + k-1]));
+            -logf(1+expf(L_a[block*L_BLOCK + k-1]));
         gamma[LastState[1][thread]]=msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[1][thread]
-            +L_a[block*L_BLOCK + k-1]-log(1+exp(L_a[block*L_BLOCK + k-1]));
+            +L_a[block*L_BLOCK + k-1]-logf(1+expf(L_a[block*L_BLOCK + k-1]));
 
         for (s1=0; s1<NSTATE; s1++)
-            sum += exp(gamma[s1]+Alpha[k-1][s1]);
+            sum += expf(gamma[s1]+Alpha[k-1][s1]);
         if (sum < MIN)
             Alpha[k][thread]=-INIFINITY;
         else
-            Alpha[k][thread]=log(sum);
+            Alpha[k][thread]=logf(sum);
         
         __syncthreads();
 
 		// normalization,prevent overflow
-        if (thread == 0) {
+       // if (thread == 0) {
+        //    max_branch[k]=Alpha[k][0];
+         //   for (s2=1;s2<NSTATE;s2++)
+          //      if (Alpha[k][s2]>max_branch[k])
+           //         max_branch[k]=Alpha[k][s2];
+        //}
             max_branch[k]=Alpha[k][0];
             for (s2=1;s2<NSTATE;s2++)
                 if (Alpha[k][s2]>max_branch[k])
                     max_branch[k]=Alpha[k][s2];
-        }
 
         __syncthreads();
         Alpha[k][thread]=Alpha[k][thread]-max_branch[k];
 	}
 
 	// backward recursion,compute Beta
-	for (k=L_BLOCK-2;k>=0;k--)
-	{
-			for (s2=0;s2<NSTATE;s2++)	// initialize metric
-				gamma[s2]=-INIFINITY;
-			gamma[NextState[0][thread]]=-msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[0][thread]
-				-log(1+exp(L_a[block*L_BLOCK + k+1]));	// bit0 
-			gamma[NextState[1][thread]]=msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[1][thread]
-				+L_a[block*L_BLOCK + k+1]-log(1+exp(L_a[block*L_BLOCK + k+1]));	// bit1 
-			sum=0.0;
-			for (s2=0;s2<NSTATE;s2++)
-				sum+=exp(gamma[s2]+Beta[k+1][s2]);
-			if (sum<MIN)
-				Beta[k][thread]=-INIFINITY;
-			else
-				Beta[k][thread]=log(sum);
+    if (index && block == BLOCK_NUM - 1 && thread != 0)
+        Beta[thread] = -INIFINITY;
+    else
+        Beta[thread] = 0;
 
-			Beta[k][thread]=Beta[k][thread]-max_branch[k+1];
-	}
-
-	// forward again,computer LLRs
-	for (k=0;k<L_BLOCK;k++) {
 		sum0[thread] = 0;
         sum1[thread] = 0;
-        double gamma0 = -msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[0][thread] - 
-            log(1+exp(L_a[block*L_BLOCK + k]));
-        double gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][thread] + 
-            L_a[block*L_BLOCK + k]-log(1+exp(L_a[block*L_BLOCK + k]));
-        sum0[thread] = exp(gamma0+Alpha[k][LastState[0][thread]]+Beta[k][thread]);
-        sum1[thread] = exp(gamma1+Alpha[k][LastState[1][thread]]+Beta[k][thread]);
+        float gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][thread] - 
+            logf(1+expf(L_a[block*L_BLOCK + L_BLOCK-1]));
+        float gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][thread] + 
+            L_a[block*L_BLOCK + L_BLOCK-1]-logf(1+expf(L_a[block*L_BLOCK + L_BLOCK-1]));
+        sum0[thread] = expf(gamma0+Alpha[L_BLOCK-1][LastState[0][thread]]+Beta[thread]);
+        sum1[thread] = expf(gamma1+Alpha[L_BLOCK-1][LastState[1][thread]]+Beta[thread]);
 
         __syncthreads();
 
         if (thread == 0) {
-            double SUM0=0, SUM1=0;
+            float SUM0=0, SUM1=0;
 
             for (unsigned int i = 0; i < NSTATE; i++) {
                 SUM0 += sum0[i];
                 SUM1 += sum1[i];
             }
 
-            L_all[block*L_BLOCK + k]=log(SUM1)-log(SUM0);
+            L_all[block*L_BLOCK + L_BLOCK-1]=logf(SUM1)-logf(SUM0);
+            //L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
+        }
+
+	for (k=L_BLOCK-2;k>=0;k--)
+	{
+			for (s2=0;s2<NSTATE;s2++)	// initialize metric
+				gamma[s2]=-INIFINITY;
+			gamma[NextState[0][thread]]=-msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[0][thread]
+				-logf(1+expf(L_a[block*L_BLOCK + k+1]));	// bit0 
+			gamma[NextState[1][thread]]=msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[1][thread]
+				+L_a[block*L_BLOCK + k+1]-logf(1+expf(L_a[block*L_BLOCK + k+1]));	// bit1 
+			sum=0.0;
+			for (s2=0;s2<NSTATE;s2++)
+				sum+=expf(gamma[s2]+Beta[s2]);
+			if (sum<MIN)
+				Beta[thread]=-INIFINITY;
+			else
+				Beta[thread]=logf(sum);
+
+			Beta[thread]=Beta[thread]-max_branch[k+1];
+
+		sum0[thread] = 0;
+        sum1[thread] = 0;
+        float gamma0 = -msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[0][thread] - 
+            logf(1+expf(L_a[block*L_BLOCK + k]));
+        float gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][thread] + 
+            L_a[block*L_BLOCK + k]-logf(1+expf(L_a[block*L_BLOCK + k]));
+        sum0[thread] = expf(gamma0+Alpha[k][LastState[0][thread]]+Beta[thread]);
+        sum1[thread] = expf(gamma1+Alpha[k][LastState[1][thread]]+Beta[thread]);
+
+        __syncthreads();
+
+        if (thread == 0) {
+            float SUM0=0, SUM1=0;
+
+            for (unsigned int i = 0; i < NSTATE; i++) {
+                SUM0 += sum0[i];
+                SUM1 += sum1[i];
+            }
+
+            L_all[block*L_BLOCK + k]=logf(SUM1)-logf(SUM0);
+            //L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
+        }
+	}
+/*
+	// forward again,computer LLRs
+	for (k=0;k<L_BLOCK;k++) {
+		sum0[thread] = 0;
+        sum1[thread] = 0;
+        float gamma0 = -msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[0][thread] - 
+            logf(1+expf(L_a[block*L_BLOCK + k]));
+        float gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][thread] + 
+            L_a[block*L_BLOCK + k]-logf(1+expf(L_a[block*L_BLOCK + k]));
+        sum0[thread] = expf(gamma0+Alpha[k][LastState[0][thread]]+Beta[k][thread]);
+        sum1[thread] = expf(gamma1+Alpha[k][LastState[1][thread]]+Beta[k][thread]);
+
+        __syncthreads();
+
+        if (thread == 0) {
+            float SUM0=0, SUM1=0;
+
+            for (unsigned int i = 0; i < NSTATE; i++) {
+                SUM0 += sum0[i];
+                SUM1 += sum1[i];
+            }
+
+            L_all[block*L_BLOCK + k]=logf(SUM1)-logf(SUM0);
             //L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
         }
 
 	}
+	*/
 
    // __syncthreads();
 
@@ -1480,17 +1538,17 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 }
 
 
-__global__ void interLeave(double * src, double * des , unsigned int * interLeaveTable ){
+__global__ void interLeave(float * src, float * des , unsigned int * interLeaveTable ){
     const int tid = blockIdx.x*blockDim.x + threadIdx.x;
     des[tid] = src[interLeaveTable[tid]];
 }
 
-__global__ void deInterLeave(double * src, double * des , unsigned int * interLeaveTable ){
+__global__ void deInterLeave(float * src, float * des , unsigned int * interLeaveTable ){
     const int tid = blockIdx.x*blockDim.x + threadIdx.x;
     des[interLeaveTable[tid]] = src[tid];
 }
 
-__global__ void gammaAlpha(double * msg ,double * parity, double * L_a, double (*gamma)[8][8], BYTE (*lastState)[8],char (*lastOut)[8] ){
+__global__ void gammaAlpha(float * msg ,float * parity, float * L_a, float (*gamma)[8][8], BYTE (*lastState)[8],char (*lastOut)[8] ){
     const int tid = blockIdx.x*blockDim.x + threadIdx.x;
 
     unsigned int s0,s2;
@@ -1504,7 +1562,7 @@ __global__ void gammaAlpha(double * msg ,double * parity, double * L_a, double (
     }
 }
 
-__global__ void gammaBeta(double * msg ,double * parity, double * L_a, double (*gamma)[8][8], BYTE (*nextState)[8], char (*nextOut)[8]){
+__global__ void gammaBeta(float * msg ,float * parity, float * L_a, float (*gamma)[8][8], BYTE (*nextState)[8], char (*nextOut)[8]){
     const int tid = blockIdx.x*blockDim.x + threadIdx.x;
 
     unsigned int s0,s2;
@@ -1518,11 +1576,11 @@ __global__ void gammaBeta(double * msg ,double * parity, double * L_a, double (*
     }
 }
 
-__global__ void Alpha(double (*Alpha)[8], double (*gamma)[8][8], double *maxBranch) {
+__global__ void Alpha(float (*Alpha)[8], float (*gamma)[8][8], float *maxBranch) {
 	const int tid = blockIdx.x*blockDim.x + threadIdx.x;
 
 	UINT k, s1, s2;
-	double sum;
+	float sum;
 
 	if (tid == 0) {
 		Alpha[0][0] = 0.0;
@@ -1560,11 +1618,11 @@ __global__ void Alpha(double (*Alpha)[8], double (*gamma)[8][8], double *maxBran
 
 }
 
-__global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index, double* maxBranch) {
+__global__ void Beta(float (*Beta)[8], float (*gamma)[8][8], bool index, float* maxBranch) {
 	const int tid = blockIdx.x*blockDim.x + threadIdx.x;
 
 	UINT k, s1, s2;
-	double sum;
+	float sum;
 
 	if (tid == (AlphaBetaTHREAD_NUM*AlphaBetaBLOCK_NUM-1)) {
 		if (index){// true -- terminated,false -- open
@@ -1601,11 +1659,11 @@ __global__ void Beta(double (*Beta)[8], double (*gamma)[8][8], bool index, doubl
 	}
 }
 
-void computeAlpha(double (*AlphaHost)[8], double (*gamma)[8][8], double *maxBranch) {
+void computeAlpha(float (*AlphaHost)[8], float (*gamma)[8][8], float *maxBranch) {
     // initialize Alpha & Beta
     AlphaHost[0][0]=0;
 	UINT s1,k,s2;
-	double sum;
+	float sum;
     for (s1=1;s1<NSTATE;s1++)
         AlphaHost[0][s1]=-INIFINITY;
 
@@ -1634,10 +1692,10 @@ void computeAlpha(double (*AlphaHost)[8], double (*gamma)[8][8], double *maxBran
     }
 }
 
-void computeBeta(double (*BetaHost)[8], double (*gamma)[8][8], bool index, double * maxBranch){
+void computeBeta(float (*BetaHost)[8], float (*gamma)[8][8], bool index, float * maxBranch){
     // initialize Beta
 	UINT s1,k,s2;
-	double sum;
+	float sum;
     if (index){// true -- terminated,false -- open
         BetaHost[L_TOTAL][0]=0;
         for (s2=1;s2<NSTATE;s2++)
@@ -1666,9 +1724,9 @@ void computeBeta(double (*BetaHost)[8], double (*gamma)[8][8], bool index, doubl
     }
 }
 
-__global__ void normalizationAlphaAndBeta(double (*Alpha)[8], double (*Beta)[8]) {
+__global__ void normalizationAlphaAndBeta(float (*Alpha)[8], float (*Beta)[8]) {
     unsigned int tid = threadIdx.x+1; 
-    double max_branch;
+    float max_branch;
     max_branch = Alpha[tid][0];
 	UINT s2;
     for (s2=1;s2<NSTATE;s2++)
@@ -1684,17 +1742,17 @@ __global__ void normalizationAlphaAndBeta(double (*Alpha)[8], double (*Beta)[8])
 
 }
 
-__global__ void LLRS(double * msg, double * parity, double * L_a, double (*Alpha)[8], double (*Beta)[8], double * L_all,BYTE (*lastState)[8], char (*lastOut)[8]) {
+__global__ void LLRS(float * msg, float * parity, float * L_a, float (*Alpha)[8], float (*Beta)[8], float * L_all,BYTE (*lastState)[8], char (*lastOut)[8]) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     UINT s2;
-	double sum0 = 0.0, sum1 = 0.0;
+	float sum0 = 0.0, sum1 = 0.0;
     for (s2=0;s2<NSTATE;s2++) {
         //gamma[LastState[0][s2]]=-msg[tid]+parity[tid]*LastOut[0][s2]-log(1+exp(L_a[tid]));
         //gamma[LastState[1][s2]]=msg[tid]+parity[tid]*LastOut[1][s2]+L_a[tid]-log(1+exp(L_a[tid]));
         //sum0+=exp(gamma[LastState[0][s2]]+Alpha[tid][LastState[0][s2]]+Beta[tid+1][s2]);
         //sum1+=exp(gamma[LastState[1][s2]]+Alpha[tid][LastState[1][s2]]+Beta[tid+1][s2]);
-        double gamma0=-msg[tid]+parity[tid]*lastOut[0][s2]-log(1+exp(L_a[tid]));
-        double gamma1=msg[tid]+parity[tid]*lastOut[1][s2]+L_a[tid]-log(1+exp(L_a[tid]));
+        float gamma0=-msg[tid]+parity[tid]*lastOut[0][s2]-log(1+exp(L_a[tid]));
+        float gamma1=msg[tid]+parity[tid]*lastOut[1][s2]+L_a[tid]-log(1+exp(L_a[tid]));
         sum0+=exp(gamma0+Alpha[tid][lastState[0][s2]]+Beta[tid+1][s2]);
         sum1+=exp(gamma1+Alpha[tid][lastState[1][s2]]+Beta[tid+1][s2]);
     }
@@ -1702,12 +1760,12 @@ __global__ void LLRS(double * msg, double * parity, double * L_a, double (*Alpha
     L_all[tid]=log(sum1)-log(sum0);
 }
 
-__global__ void extrinsicInformation(double * L_all, double * msg, double * L_a, double * L_e) {
+__global__ void extrinsicInformation(float * L_all, float * msg, float * L_a, float * L_e) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     L_e[tid] = L_all[tid] - 2*msg[tid] - L_a[tid];
 }
 
-__global__ void demultiplex(double * stream, double * msg, double * parity0, double * parity1) {
+__global__ void demultiplex(float * stream, float * msg, float * parity0, float * parity1) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     //if (puncture){// punctured rate=1/2
     //    msg[tid]=stream[2*tid];
@@ -1723,13 +1781,13 @@ __global__ void demultiplex(double * stream, double * msg, double * parity0, dou
         parity1[tid]=stream[3*tid+2];
 }
 
-__global__ void initializeExtrinsicInformation(double * L_e) {
+__global__ void initializeExtrinsicInformation(float * L_e) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     L_e[tid] = 0;
     
 }
 
-__global__ void exestimateInformationBits(double * L_all, BYTE * msghat, UINT * m_Inter_table) {
+__global__ void exestimateInformationBits(float * L_all, BYTE * msghat, UINT * m_Inter_table) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     if(L_all[tid]>0)
         msghat[m_Inter_table[tid]]=1;
@@ -1760,49 +1818,49 @@ int main(int argc, char* argv[])
 
 	BYTE * m;
 	BYTE * x;
-	double * y;
+	float * y;
 	BYTE * mhat;
 
 	int frame;
 	UINT bits_all,bits_err[MAXITER],frame_err[MAXITER];
-	double Ber,Fer;
-	double Eb_No_dB,No;
+	float Ber,Fer;
+	float Eb_No_dB,No;
 	int i;
 
 	m = new BYTE[L_TOTAL];
 	x = new BYTE[L_ALL];
-	y = new double[L_ALL];
+	y = new float[L_ALL];
 	mhat = new BYTE[L_TOTAL];
 
 	//init_Block_interleave_table();	// block interleave
 
     findCudaDevice(argc, (const char **)argv);
 
-	double * yDevice;
-	double * msgDevice;
-	double * imsgDevice;
+	float * yDevice;
+	float * msgDevice;
+	float * imsgDevice;
 	BYTE * mhatDevice;
-	double * parity0Device;
-	double * parity1Device;
+	float * parity0Device;
+	float * parity1Device;
 	UINT * tableDevice;
-	double * L_eDevice;
-	double * L_aDevice;
-	double * L_allDevice;
+	float * L_eDevice;
+	float * L_aDevice;
+	float * L_allDevice;
 
-    cudaMalloc((void **)&yDevice, L_ALL*sizeof(double));
-    cudaMalloc((void **)&msgDevice, L_TOTAL*sizeof(double));
-    cudaMalloc((void **)&imsgDevice, L_TOTAL*sizeof(double));
+    cudaMalloc((void **)&yDevice, L_ALL*sizeof(float));
+    cudaMalloc((void **)&msgDevice, L_TOTAL*sizeof(float));
+    cudaMalloc((void **)&imsgDevice, L_TOTAL*sizeof(float));
     cudaMalloc((void **)&mhatDevice, L_TOTAL*sizeof(BYTE));
-    cudaMalloc((void **)&parity0Device, L_TOTAL*sizeof(double));
-    cudaMalloc((void **)&parity1Device, L_TOTAL*sizeof(double));
+    cudaMalloc((void **)&parity0Device, L_TOTAL*sizeof(float));
+    cudaMalloc((void **)&parity1Device, L_TOTAL*sizeof(float));
     cudaMalloc((void **)&tableDevice, L_TOTAL*sizeof(unsigned int));
-    cudaMalloc((void **)&L_eDevice, L_TOTAL*sizeof(double));
-    cudaMalloc((void **)&L_aDevice, L_TOTAL*sizeof(double));
-    cudaMalloc((void **)&L_allDevice, L_TOTAL*sizeof(double));
+    cudaMalloc((void **)&L_eDevice, L_TOTAL*sizeof(float));
+    cudaMalloc((void **)&L_aDevice, L_TOTAL*sizeof(float));
+    cudaMalloc((void **)&L_allDevice, L_TOTAL*sizeof(float));
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	for (Eb_No_dB= 0.0;Eb_No_dB<2.0;Eb_No_dB+=1.1){
+	for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
 	//for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
 		No = 1/pow(10.0,Eb_No_dB/10.0);
 		bits_all = 0;
@@ -1828,7 +1886,7 @@ int main(int argc, char* argv[])
 				else
 					y[i]=-1.0+gaussian(No/2);
 
-			cudaMemcpy(yDevice,y,sizeof(double)*L_ALL, cudaMemcpyHostToDevice);
+			cudaMemcpy(yDevice,y,sizeof(float)*L_ALL, cudaMemcpyHostToDevice);
 
 			demultiplex<<<LEAVER_BLOCK,LEAVER_THREAD>>>(yDevice, msgDevice, parity0Device, parity1Device); 
 			interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(msgDevice, imsgDevice, tableDevice);
@@ -1865,8 +1923,8 @@ int main(int argc, char* argv[])
 		//fprintf(fp,"-------------------------\n");
 
 		for (i=0;i<MAXITER;i++) {
-			Ber=(double)bits_err[i]/(double)bits_all;
-			Fer=(double)frame_err[i]/(double)FRAME_NUM;
+			Ber=(float)bits_err[i]/(float)bits_all;
+			Fer=(float)frame_err[i]/(float)FRAME_NUM;
 			printf("Iteration:%d\n",i+1);
 			printf("---Ber=%f\n---Fer=%f\n",Ber,Fer);
 		}
