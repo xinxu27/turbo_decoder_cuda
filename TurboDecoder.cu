@@ -26,14 +26,15 @@
 using namespace std;
 
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
-#define MAXITER 5
-#define	FRAME_NUM 10
-//#define AlphaBetaBLOCK_NUM 8
-//#define AlphaBetaTHREAD_NUM 8
+#define MAXITER 3
+#define	FRAME_NUM 100
+#define AlphaBetaBLOCK_NUM 8
+#define AlphaBetaTHREAD_NUM 8
 
-#define THREAD_NUM 6
-#define BLOCK_NUM 8
-#define L_BLOCK BLOCKL_TOTAL/BLOCK_NUM
+#define THREAD_NUM 8
+#define BLOCK_NUM 4
+#define L_BLOCK 1536
+//#define L_BLOCK L_TOTAL/BLOCK_NUM
 
 #define LEAVER_BLOCK 8
 #define LEAVER_THREAD 768
@@ -754,9 +755,6 @@ bool boolrandom()
 	else
 		return false;
 }
-//time_t t;	
-//time(&t);	
-//init((long)t);
 long seed = 1234421;
 
 #define M	3	// register length,=tail length
@@ -786,25 +784,25 @@ static const char EnNextOut[2][NSTATE] = // check bit based on current and input
 {	0,0,1,1,1,1,0,0,
 	1,1,0,0,0,0,1,1
 };
-static const char NextOut[2][NSTATE] = // check bit based on current and input bit
-{	-1,-1,1,1,1,1,-1,-1,
-	1,1,-1,-1,-1,-1,1,1
-};
+//static const char NextOut[2][NSTATE] = // check bit based on current and input bit
+//{	-1,-1,1,1,1,1,-1,-1,
+//	1,1,-1,-1,-1,-1,1,1
+//};
 // NextState[bk][current state]
 static const BYTE NextState[2][NSTATE] = // next state based on current and input bit
 {	0,4,5,1,2,6,7,3,
 	4,0,1,5,6,2,3,7
 };
 // LastOut[bk][current state]
-static const char LastOut[2][NSTATE] =	// trellis last check bit
-{	-1,1,1,-1,-1,1,1,-1,
-	1,-1,-1,1,1,-1,-1,1
-};
+//static const char LastOut[2][NSTATE] =	// trellis last check bit
+//{	-1,1,1,-1,-1,1,1,-1,
+//	1,-1,-1,1,1,-1,-1,1
+//};
 // LastState[bk][current state]
-static const BYTE LastState[2][NSTATE] =	// last state lead to current state by input bk
-{	0,3,4,7,1,2,5,6,
-	1,2,5,6,0,3,4,7
-};
+//static const BYTE LastState[2][NSTATE] =	// last state lead to current state by input bk
+//{	0,3,4,7,1,2,5,6,
+//	1,2,5,6,0,3,4,7
+//};
 // TailBit[current state]
 static const char TailBit[NSTATE] = // tail info bits when trellis is terminating
 {	0,1,1,0,0,1,1,0
@@ -1336,22 +1334,22 @@ void encode(BYTE *msg, BYTE *stream, bool puncture)
 __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, bool index, bool decoder2)
 {
 
-    __shared__ const char NextOut[2][NSTATE] = // check bit based on current and input bit
+    const char NextOut[2][NSTATE] = // check bit based on current and input bit
     {	-1,-1,1,1,1,1,-1,-1,
         1,1,-1,-1,-1,-1,1,1
     };
     // NextState[bk][current state]
-    __shared__  const BYTE NextState[2][NSTATE] = // next state based on current and input bit
+    const BYTE NextState[2][NSTATE] = // next state based on current and input bit
     {	0,4,5,1,2,6,7,3,
         4,0,1,5,6,2,3,7
     };
     // LastOut[bk][current state]
-    __shared__ const char LastOut[2][NSTATE] =	// trellis last check bit
+    const char LastOut[2][NSTATE] =	// trellis last check bit
     {	-1,1,1,-1,-1,1,1,-1,
         1,-1,-1,1,1,-1,-1,1
     };
     // LastState[bk][current state]
-    __shared__ const BYTE LastState[2][NSTATE] =	// last state lead to current state by input bk
+    const BYTE LastState[2][NSTATE] =	// last state lead to current state by input bk
     {	0,3,4,7,1,2,5,6,
         1,2,5,6,0,3,4,7
     };
@@ -1364,7 +1362,7 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 	double gamma[8];
     double sum;
 
-	INT k;
+	UINT k;
 
 	// alloc memory,
 	__shared__ double Alpha[L_BLOCK][8];
@@ -1372,16 +1370,16 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 	__shared__ double sum0[8];
 	__shared__ double sum1[8];
 
-	__shared___ double max_branch[L_BLOCK];
+	__shared__ double max_branch[L_BLOCK];
     
     //double L_e[L_BLOCK];
 
 	// initialize Alpha & Beta
-	if (blockIdx.x == 0 && threadIdx.x != 0) {
-			Alpha[0][threadIdx.x]=-INIFINITY;
+	if (block == 0 && thread != 0) {
+			Alpha[0][thread]=-INIFINITY;
 	}
 	else {
-			Alpha[0][threadIdx.x]=0;
+			Alpha[0][thread]=0;
 	}
 
     if (index && block == BLOCK_NUM - 1 && thread != 0)
@@ -1404,7 +1402,7 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
         for (s1=0; s1<NSTATE; s1++)
             sum += exp(gamma[s1]+Alpha[k-1][s1]);
         if (sum < MIN)
-            Alpha[k][thread]=-INIFINITY_;
+            Alpha[k][thread]=-INIFINITY;
         else
             Alpha[k][thread]=log(sum);
         
@@ -1456,15 +1454,15 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
         __syncthreads();
 
         if (thread == 0) {
-            double SUM0, SUM1;
+            double SUM0=0, SUM1=0;
 
-            for (unsigned int i = 0; i < 8; i++) {
+            for (unsigned int i = 0; i < NSTATE; i++) {
                 SUM0 += sum0[i];
                 SUM1 += sum1[i];
             }
 
             L_all[block*L_BLOCK + k]=log(SUM1)-log(SUM0);
-            L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
+            //L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
         }
 
 	}
@@ -1736,8 +1734,10 @@ __global__ void exestimateInformationBits(double * L_all, BYTE * msghat, UINT * 
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     if(L_all[tid]>0)
         msghat[m_Inter_table[tid]]=1;
+        //msghat[tid]=1;
     else
         msghat[m_Inter_table[tid]]=0;
+        //msghat[tid]=0;
 }
 
 void countErrors(BYTE *m, BYTE * mhat, UINT * bitsError, UINT * frameError, UINT iter) {
@@ -1803,7 +1803,7 @@ int main(int argc, char* argv[])
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
+	for (Eb_No_dB= 0.0;Eb_No_dB<2.0;Eb_No_dB+=1.1){
 	//for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
 		No = 1/pow(10.0,Eb_No_dB/10.0);
 		bits_all = 0;
@@ -1845,7 +1845,7 @@ int main(int argc, char* argv[])
 
 				interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice, tableDevice);
 
-                logmap<<<BLOCK_NUM, THREAD_NUM>>>(msgDevice, parity0Device, L_aDevice, L_allDevice, true, false);
+                logmap<<<BLOCK_NUM, THREAD_NUM>>>(imsgDevice, parity1Device, L_aDevice, L_allDevice, false, true);
 
 				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, imsgDevice, L_aDevice, L_eDevice);
 
