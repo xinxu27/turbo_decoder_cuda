@@ -32,9 +32,8 @@ using namespace std;
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 4
-#define L_BLOCK 1536
-//#define L_BLOCK L_TOTAL/BLOCK_NUM
+#define BLOCK_NUM 64
+#define L_BLOCK L_TOTAL/BLOCK_NUM
 
 #define LEAVER_BLOCK 8
 #define LEAVER_THREAD 768
@@ -1362,7 +1361,7 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 	double gamma[8];
     double sum;
 
-	UINT k;
+	INT k;
 
 	// alloc memory,
 	__shared__ double Alpha[L_BLOCK][8];
