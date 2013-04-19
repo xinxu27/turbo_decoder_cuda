@@ -26,13 +26,13 @@
 using namespace std;
 
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
-#define MAXITER 3
+#define MAXITER 10
 #define	FRAME_NUM 100
 #define AlphaBetaBLOCK_NUM 8
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 32
+#define BLOCK_NUM 16
 #define L_BLOCK L_TOTAL/BLOCK_NUM
 
 #define LEAVER_BLOCK 8
@@ -662,6 +662,7 @@ UINT m_Inter_table[L_TOTAL] =
 4382,3973,4524,6035,2362,5793,4040,3247,3414,4541,
 484,3531,1394,217};
 
+
 long idum2;
 long idum;
 long iy;
@@ -671,7 +672,7 @@ unsigned memory;
 Long period (? 2 \Theta 10 18 ) random number generator of L'Ecuyer with Bays­Durham shuffle
 and added safeguards. Returns a uniform random deviate between 0.0 and 1.0 (exclusive of
 the endpoint values). Call with idum a negative integer to initialize; thereafter, do not alter
-idum between successive deviates in a sequence. RNMX should approximate the largest floating
+idum between successive deviates in a sequence. RNMX should approximate the largest doubleing
 value that is less than 1.
 --
 */
@@ -1365,12 +1366,13 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 
 	// alloc memory,
 	__shared__ double Alpha[L_BLOCK][8];
-	__shared__ double Beta[L_BLOCK][8];
+	__shared__ double Beta[8];
 	__shared__ double sum0[8];
 	__shared__ double sum1[8];
 
-	__shared__ double max_branch[L_BLOCK];
+	double max_branch[L_BLOCK];
     
+	//__shared__ double max_branch[L_BLOCK];
     //double L_e[L_BLOCK];
 
 	// initialize Alpha & Beta
@@ -1381,10 +1383,10 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 			Alpha[0][thread]=0;
 	}
 
-    if (index && block == BLOCK_NUM - 1 && thread != 0)
-        Beta[L_BLOCK-1][thread] = -INIFINITY;
-    else
-        Beta[L_BLOCK-1][thread] = 0;
+    //if (index && block == BLOCK_NUM - 1 && thread != 0)
+     //   Beta[L_BLOCK-1][thread] = -INIFINITY;
+    //else
+     //   Beta[L_BLOCK-1][thread] = 0;
 
 	// forward recursion,compute Alpha 
 	for (k=1;k<L_BLOCK;k++)
@@ -1408,18 +1410,50 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
         __syncthreads();
 
 		// normalization,prevent overflow
-        if (thread == 0) {
+       // if (thread == 0) {
+        //    max_branch[k]=Alpha[k][0];
+         //   for (s2=1;s2<NSTATE;s2++)
+          //      if (Alpha[k][s2]>max_branch[k])
+           //         max_branch[k]=Alpha[k][s2];
+        //}
             max_branch[k]=Alpha[k][0];
             for (s2=1;s2<NSTATE;s2++)
                 if (Alpha[k][s2]>max_branch[k])
                     max_branch[k]=Alpha[k][s2];
-        }
 
         __syncthreads();
         Alpha[k][thread]=Alpha[k][thread]-max_branch[k];
 	}
 
 	// backward recursion,compute Beta
+    if (index && block == BLOCK_NUM - 1 && thread != 0)
+        Beta[thread] = -INIFINITY;
+    else
+        Beta[thread] = 0;
+
+		sum0[thread] = 0;
+        sum1[thread] = 0;
+        double gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][thread] - 
+            log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
+        double gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][thread] + 
+            L_a[block*L_BLOCK + L_BLOCK-1]-log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
+        sum0[thread] = exp(gamma0+Alpha[L_BLOCK-1][LastState[0][thread]]+Beta[thread]);
+        sum1[thread] = exp(gamma1+Alpha[L_BLOCK-1][LastState[1][thread]]+Beta[thread]);
+
+        __syncthreads();
+
+        if (thread == 0) {
+            double SUM0=0, SUM1=0;
+
+            for (unsigned int i = 0; i < NSTATE; i++) {
+                SUM0 += sum0[i];
+                SUM1 += sum1[i];
+            }
+
+            L_all[block*L_BLOCK + L_BLOCK-1]=log(SUM1)-log(SUM0);
+            //L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
+        }
+
 	for (k=L_BLOCK-2;k>=0;k--)
 	{
 			for (s2=0;s2<NSTATE;s2++)	// initialize metric
@@ -1430,25 +1464,22 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 				+L_a[block*L_BLOCK + k+1]-log(1+exp(L_a[block*L_BLOCK + k+1]));	// bit1 
 			sum=0.0;
 			for (s2=0;s2<NSTATE;s2++)
-				sum+=exp(gamma[s2]+Beta[k+1][s2]);
+				sum+=exp(gamma[s2]+Beta[s2]);
 			if (sum<MIN)
-				Beta[k][thread]=-INIFINITY;
+				Beta[thread]=-INIFINITY;
 			else
-				Beta[k][thread]=log(sum);
+				Beta[thread]=log(sum);
 
-			Beta[k][thread]=Beta[k][thread]-max_branch[k+1];
-	}
+			Beta[thread]=Beta[thread]-max_branch[k+1];
 
-	// forward again,computer LLRs
-	for (k=0;k<L_BLOCK;k++) {
 		sum0[thread] = 0;
         sum1[thread] = 0;
         double gamma0 = -msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[0][thread] - 
             log(1+exp(L_a[block*L_BLOCK + k]));
         double gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][thread] + 
             L_a[block*L_BLOCK + k]-log(1+exp(L_a[block*L_BLOCK + k]));
-        sum0[thread] = exp(gamma0+Alpha[k][LastState[0][thread]]+Beta[k][thread]);
-        sum1[thread] = exp(gamma1+Alpha[k][LastState[1][thread]]+Beta[k][thread]);
+        sum0[thread] = exp(gamma0+Alpha[k][LastState[0][thread]]+Beta[thread]);
+        sum1[thread] = exp(gamma1+Alpha[k][LastState[1][thread]]+Beta[thread]);
 
         __syncthreads();
 
@@ -1463,8 +1494,35 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
             L_all[block*L_BLOCK + k]=log(SUM1)-log(SUM0);
             //L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
         }
+	}
+/*
+	// forward again,computer LLRs
+	for (k=0;k<L_BLOCK;k++) {
+		sum0[thread] = 0;
+        sum1[thread] = 0;
+        double gamma0 = -msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[0][thread] - 
+            logf(1+expf(L_a[block*L_BLOCK + k]));
+        double gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][thread] + 
+            L_a[block*L_BLOCK + k]-logf(1+expf(L_a[block*L_BLOCK + k]));
+        sum0[thread] = expf(gamma0+Alpha[k][LastState[0][thread]]+Beta[k][thread]);
+        sum1[thread] = expf(gamma1+Alpha[k][LastState[1][thread]]+Beta[k][thread]);
+
+        __syncthreads();
+
+        if (thread == 0) {
+            double SUM0=0, SUM1=0;
+
+            for (unsigned int i = 0; i < NSTATE; i++) {
+                SUM0 += sum0[i];
+                SUM1 += sum1[i];
+            }
+
+            L_all[block*L_BLOCK + k]=logf(SUM1)-logf(SUM0);
+            //L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
+        }
 
 	}
+	*/
 
    // __syncthreads();
 
@@ -1802,7 +1860,7 @@ int main(int argc, char* argv[])
 
     cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	for (Eb_No_dB= 0.0;Eb_No_dB<2.0;Eb_No_dB+=1.1){
+	for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
 	//for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
 		No = 1/pow(10.0,Eb_No_dB/10.0);
 		bits_all = 0;
