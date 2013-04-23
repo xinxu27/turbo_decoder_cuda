@@ -26,8 +26,8 @@
 using namespace std;
 
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
-#define MAXITER 10
-#define	FRAME_NUM 1000
+#define MAXITER 5
+#define	FRAME_NUM 10
 #define AlphaBetaBLOCK_NUM 8
 #define AlphaBetaTHREAD_NUM 8
 
@@ -661,7 +661,6 @@ UINT m_Inter_table[L_TOTAL] =
 5976,2111,5350,3405,2420,2395,3330,5225,1936,5751,
 4382,3973,4524,6035,2362,5793,4040,3247,3414,4541,
 484,3531,1394,217};
-
 
 long idum2;
 long idum;
@@ -1330,8 +1329,9 @@ void encode(BYTE *msg, BYTE *stream, bool puncture)
 
 //////////////////////////////////////////////////////////////////////
 // LogMAP component decoder
+// index true decoder1 false decoder2
 //////////////////////////////////////////////////////////////////////
-__global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, bool index, bool decoder2)
+__global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, bool index)
 {
 
     const char NextOut[2][NSTATE] = // check bit based on current and input bit
@@ -1505,14 +1505,16 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 }
 
 
-__global__ void interLeave(double * src, double * des , unsigned int * interLeaveTable ){
+__global__ void interLeave(double * src, double * des){
     const int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    des[tid] = src[interLeaveTable[tid]];
+    //des[tid] = src[interLeaveTable[tid]];
+    des[tid] = src[(((263 + tid*480)%6144)*tid)%6144];
 }
 
-__global__ void deInterLeave(double * src, double * des , unsigned int * interLeaveTable ){
+__global__ void deInterLeave(double * src, double * des){
     const int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    des[interLeaveTable[tid]] = src[tid];
+    //des[interLeaveTable[tid]] = src[tid];
+    des[(((263 + tid*480)%6144)*tid)%6144] = src[tid];
 }
 
 __global__ void gammaAlpha(double * msg ,double * parity, double * L_a, double (*gamma)[8][8], BYTE (*lastState)[8],char (*lastOut)[8] ){
@@ -1754,14 +1756,14 @@ __global__ void initializeExtrinsicInformation(double * L_e) {
     
 }
 
-__global__ void exestimateInformationBits(double * L_all, BYTE * msghat, UINT * m_Inter_table) {
+__global__ void exestimateInformationBits(double * L_all, BYTE * msghat) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     if(L_all[tid]>0)
-        msghat[m_Inter_table[tid]]=1;
-        //msghat[tid]=1;
+        //msghat[m_Inter_table[tid]]=1;
+		msghat[(((263 + tid*480)%6144)*tid)%6144] = 1;
     else
-        msghat[m_Inter_table[tid]]=0;
-        //msghat[tid]=0;
+        //msghat[m_Inter_table[tid]]=0;
+		msghat[(((263 + tid*480)%6144)*tid)%6144] = 0;
 }
 
 void countErrors(BYTE *m, BYTE * mhat, UINT * bitsError, UINT * frameError, UINT iter) {
@@ -1809,7 +1811,7 @@ int main(int argc, char* argv[])
 	BYTE * mhatDevice;
 	double * parity0Device;
 	double * parity1Device;
-	UINT * tableDevice;
+	//UINT * tableDevice;
 	double * L_eDevice;
 	double * L_aDevice;
 	double * L_allDevice;
@@ -1820,15 +1822,15 @@ int main(int argc, char* argv[])
     cudaMalloc((void **)&mhatDevice, L_TOTAL*sizeof(BYTE));
     cudaMalloc((void **)&parity0Device, L_TOTAL*sizeof(double));
     cudaMalloc((void **)&parity1Device, L_TOTAL*sizeof(double));
-    cudaMalloc((void **)&tableDevice, L_TOTAL*sizeof(unsigned int));
+    //cudaMalloc((void **)&tableDevice, L_TOTAL*sizeof(unsigned int));
     cudaMalloc((void **)&L_eDevice, L_TOTAL*sizeof(double));
     cudaMalloc((void **)&L_aDevice, L_TOTAL*sizeof(double));
     cudaMalloc((void **)&L_allDevice, L_TOTAL*sizeof(double));
 
-    cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
+    //cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	//for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
-	for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
+	for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
+	//for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
 		No = 1/pow(10.0,Eb_No_dB/10.0);
 		bits_all = 0;
 		for (i =0; i<MAXITER;i++) {
@@ -1856,24 +1858,24 @@ int main(int argc, char* argv[])
 			cudaMemcpy(yDevice,y,sizeof(double)*L_ALL, cudaMemcpyHostToDevice);
 
 			demultiplex<<<LEAVER_BLOCK,LEAVER_THREAD>>>(yDevice, msgDevice, parity0Device, parity1Device); 
-			interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(msgDevice, imsgDevice, tableDevice);
+			interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(msgDevice, imsgDevice);
 			initializeExtrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice);
 
 			for (int iter = 0; iter<MAXITER; iter++) {
 				
-				deInterLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice, tableDevice);
+				deInterLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
 
-                logmap<<<BLOCK_NUM, THREAD_NUM>>>(msgDevice, parity0Device, L_aDevice, L_allDevice, true, false);
+                logmap<<<BLOCK_NUM, THREAD_NUM>>>(msgDevice, parity0Device, L_aDevice, L_allDevice, true);
 
 				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
 
-				interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice, tableDevice);
+				interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
 
-                logmap<<<BLOCK_NUM, THREAD_NUM>>>(imsgDevice, parity1Device, L_aDevice, L_allDevice, false, true);
+                logmap<<<BLOCK_NUM, THREAD_NUM>>>(imsgDevice, parity1Device, L_aDevice, L_allDevice, false);
 
 				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, imsgDevice, L_aDevice, L_eDevice);
 
-				exestimateInformationBits<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, mhatDevice, tableDevice); 
+				exestimateInformationBits<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, mhatDevice); 
 
 				cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
 				countErrors(m, mhat, bits_err, frame_err, iter);
@@ -1908,7 +1910,6 @@ int main(int argc, char* argv[])
 	cudaFree(mhatDevice);
 	cudaFree(parity0Device);
 	cudaFree(parity1Device);
-	cudaFree(tableDevice);
 	cudaFree(L_eDevice);
 	cudaFree(L_aDevice);
 	cudaFree(L_allDevice);
