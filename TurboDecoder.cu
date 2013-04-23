@@ -32,7 +32,7 @@ using namespace std;
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 32
+#define BLOCK_NUM 64
 #define L_BLOCK L_TOTAL/BLOCK_NUM
 
 #define LEAVER_BLOCK 8
