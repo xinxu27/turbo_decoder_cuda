@@ -32,7 +32,7 @@ using namespace std;
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 64
+#define BLOCK_NUM 16
 #define L_BLOCK L_TOTAL/BLOCK_NUM
 
 #define LEAVER_BLOCK 8
@@ -1327,6 +1327,18 @@ void encode(BYTE *msg, BYTE *stream, bool puncture)
 	}
 }
 
+__device__ double maxL(double x, double y) {
+	return x>y?x:y;
+}
+
+__device__ double maxArray(double* arr, UINT length) {
+	double temp = arr[0];
+	for (int i = 1; i< length; i++) {
+		if (arr[i] > temp)
+			temp = arr[i];
+	}
+	return temp;
+}
 //////////////////////////////////////////////////////////////////////
 // LogMAP component decoder
 // index true decoder1 false decoder2
@@ -1358,19 +1370,23 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
     const unsigned int block = blockIdx.x;
     const unsigned int thread = threadIdx.x;
 
-	UINT s1,s2;
-	double gamma[8];
-    double sum;
+	//UINT s2;
+	//double gamma[8];
+	double gamma0, gamma1;
+    //double sum;
 
 	INT k;
 
 	// alloc memory,
 	__shared__ double Alpha[L_BLOCK][8];
 	__shared__ double Beta[2][8];
-	__shared__ double sum0[8];
-	__shared__ double sum1[8];
+	//__shared__ double sum0[8];
+	//__shared__ double sum1[8];
 
-	double max_branch[L_BLOCK];
+	__shared__ double tempSum0[8];
+	__shared__ double tempSum1[8];
+
+	//double max_branch[L_BLOCK];
     
 	//__shared__ double max_branch[L_BLOCK];
     //double L_e[L_BLOCK];
@@ -1380,29 +1396,36 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 			Alpha[0][thread]=-INIFINITY;
 	}
 	else {
-			Alpha[0][thread]=0;
+			Alpha[0][thread] = 0;
 	}
 
 	// forward recursion,compute Alpha 
 	for (k=1;k<L_BLOCK;k++)
 	{
-        sum=0;
+        //sum=0;
 
-        for (s1=0;s1<NSTATE;s1++)
-            gamma[s1]=-INIFINITY;
-        gamma[LastState[0][thread]]=-msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[0][thread]
+        //for (s1=0;s1<NSTATE;s1++)
+        //    gamma[s1]=-INIFINITY;
+        gamma0=-msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[0][thread]
             -log(1+exp(L_a[block*L_BLOCK + k-1]));
-        gamma[LastState[1][thread]]=msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[1][thread]
+        gamma1=msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[1][thread]
             +L_a[block*L_BLOCK + k-1]-log(1+exp(L_a[block*L_BLOCK + k-1]));
+        //gamma[LastState[0][thread]]=-msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[0][thread]
+        //    -log(1+exp(L_a[block*L_BLOCK + k-1]));
+        //gamma[LastState[1][thread]]=msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[1][thread]
+        //    +L_a[block*L_BLOCK + k-1]-log(1+exp(L_a[block*L_BLOCK + k-1]));
 
-        for (s1=0; s1<NSTATE; s1++)
-            sum += exp(gamma[s1]+Alpha[k-1][s1]);
-        if (sum < MIN)
-            Alpha[k][thread]=-INIFINITY;
-        else
-            Alpha[k][thread]=log(sum);
+		Alpha[k][thread] = 
+			maxL(gamma0 + Alpha[k-1][LastState[0][thread]], 
+				gamma1 + Alpha[k-1][LastState[1][thread]]);
+        //for (s1=0; s1<NSTATE; s1++)
+        //    sum += exp(gamma[s1]+Alpha[k-1][s1]);
+        //if (sum < MIN)
+        //    Alpha[k][thread]=-INIFINITY;
+        //else
+        //    Alpha[k][thread]=log(sum);
         
-        __syncthreads();
+        //__syncthreads();
 
 		// normalization,prevent overflow
        // if (thread == 0) {
@@ -1411,13 +1434,14 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
           //      if (Alpha[k][s2]>max_branch[k])
            //         max_branch[k]=Alpha[k][s2];
         //}
-            max_branch[k]=Alpha[k][0];
-            for (s2=1;s2<NSTATE;s2++)
-                if (Alpha[k][s2]>max_branch[k])
-                    max_branch[k]=Alpha[k][s2];
 
-        __syncthreads();
-        Alpha[k][thread]=Alpha[k][thread]-max_branch[k];
+		//max_branch[k]=Alpha[k][0];
+		//for (s2=1;s2<NSTATE;s2++)
+		//	if (Alpha[k][s2]>max_branch[k])
+		//		max_branch[k]=Alpha[k][s2];
+
+        //__syncthreads();
+        //Alpha[k][thread]=Alpha[k][thread]-max_branch[k];
 	}
 
 	// backward recursion,compute Beta
@@ -1426,69 +1450,88 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
     else
         Beta[1][thread] = 0;
 
-		sum0[thread] = 0;
-        sum1[thread] = 0;
-        double gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][thread] - 
-            log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
-        double gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][thread] + 
-            L_a[block*L_BLOCK + L_BLOCK-1]-log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
-        sum0[thread] = exp(gamma0+Alpha[L_BLOCK-1][LastState[0][thread]]+Beta[1][thread]);
-        sum1[thread] = exp(gamma1+Alpha[L_BLOCK-1][LastState[1][thread]]+Beta[1][thread]);
+	//	sum0[thread] = 0;
+     //   sum1[thread] = 0;
+        //double gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][thread] - 
+        //    log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
+        //double gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][thread] + 
+        //    L_a[block*L_BLOCK + L_BLOCK-1]-log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
+        //gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][thread] - 
+        //    log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
+        //gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][thread] + 
+        //    L_a[block*L_BLOCK + L_BLOCK-1]-log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
+        //sum0[thread] = exp(gamma0+Alpha[L_BLOCK-1][LastState[0][thread]]+Beta[1][thread]);
+        //sum1[thread] = exp(gamma1+Alpha[L_BLOCK-1][LastState[1][thread]]+Beta[1][thread]);
 
+        gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][thread] - 
+            log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
+        gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][thread] + 
+            L_a[block*L_BLOCK + L_BLOCK-1]-log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
+        tempSum0[thread] = gamma0+Alpha[L_BLOCK-1][LastState[0][thread]]+Beta[1][thread];
+        tempSum1[thread] = gamma1+Alpha[L_BLOCK-1][LastState[1][thread]]+Beta[1][thread];
         __syncthreads();
 
         if (thread == 0) {
-            double SUM0=0, SUM1=0;
+            //double SUM0=0, SUM1=0;
 
-            for (unsigned int i = 0; i < NSTATE; i++) {
-                SUM0 += sum0[i];
-                SUM1 += sum1[i];
-            }
+            //for (unsigned int i = 0; i < NSTATE; i++) {
+            //    SUM0 += sum0[i];
+            //    SUM1 += sum1[i];
+            //}
 
-            L_all[block*L_BLOCK + L_BLOCK-1]=log(SUM1)-log(SUM0);
-            //L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
+            //L_all[block*L_BLOCK + L_BLOCK-1]=log(SUM1)-log(SUM0);
+            L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(tempSum1, 8) - maxArray(tempSum0, 8); 
+			//L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
         }
 
 	for (k=L_BLOCK-2;k>=0;k--)
 	{
-			for (s2=0;s2<NSTATE;s2++)	// initialize metric
-				gamma[s2]=-INIFINITY;
-			gamma[NextState[0][thread]]=-msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[0][thread]
+			//for (s2=0;s2<NSTATE;s2++)	// initialize metric
+		//		gamma[s2]=-INIFINITY;
+			gamma0 =-msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[0][thread]
 				-log(1+exp(L_a[block*L_BLOCK + k+1]));	// bit0 
-			gamma[NextState[1][thread]]=msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[1][thread]
+			gamma1 =msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[1][thread]
 				+L_a[block*L_BLOCK + k+1]-log(1+exp(L_a[block*L_BLOCK + k+1]));	// bit1 
-			sum=0.0;
-			for (s2=0;s2<NSTATE;s2++)
-				sum+=exp(gamma[s2]+Beta[1][s2]);
-			if (sum<MIN)
-				Beta[0][thread]=-INIFINITY;
-			else
-				Beta[0][thread]=log(sum);
 
-            __syncthreads();
+		    Beta[0][thread] = 
+				maxL(gamma0 + Beta[1][NextState[0][thread]], 
+					gamma1 + Beta[1][NextState[1][thread]]);
+		//	sum=0.0;
+		//	for (s2=0;s2<NSTATE;s2++)
+		//		sum+=exp(gamma[s2]+Beta[1][s2]);
+		//	if (sum<MIN)
+		//		Beta[0][thread]=-INIFINITY;
+		//	else
+		//		Beta[0][thread]=log(sum);
 
-			Beta[1][thread]=Beta[0][thread]-max_branch[k+1];
+		__syncthreads();
 
-		sum0[thread] = 0;
-        sum1[thread] = 0;
-        double gamma0 = -msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[0][thread] - 
+			//Beta[1][thread]=Beta[0][thread]-max_branch[k+1];
+		Beta[1][thread]=Beta[0][thread];
+
+		//sum0[thread] = 0;
+        //sum1[thread] = 0;
+        gamma0 = -msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[0][thread] - 
             log(1+exp(L_a[block*L_BLOCK + k]));
-        double gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][thread] + 
+        gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][thread] + 
             L_a[block*L_BLOCK + k]-log(1+exp(L_a[block*L_BLOCK + k]));
-        sum0[thread] = exp(gamma0+Alpha[k][LastState[0][thread]]+Beta[1][thread]);
-        sum1[thread] = exp(gamma1+Alpha[k][LastState[1][thread]]+Beta[1][thread]);
+        //sum0[thread] = exp(gamma0+Alpha[k][LastState[0][thread]]+Beta[1][thread]);
+        //sum1[thread] = exp(gamma1+Alpha[k][LastState[1][thread]]+Beta[1][thread]);
+        tempSum0[thread] = gamma0+Alpha[k][LastState[0][thread]]+Beta[1][thread];
+        tempSum1[thread] = gamma1+Alpha[k][LastState[1][thread]]+Beta[1][thread];
 
         __syncthreads();
 
         if (thread == 0) {
-            double SUM0=0, SUM1=0;
+            //double SUM0=0, SUM1=0;
 
-            for (unsigned int i = 0; i < NSTATE; i++) {
-                SUM0 += sum0[i];
-                SUM1 += sum1[i];
-            }
+            //for (unsigned int i = 0; i < NSTATE; i++) {
+            //    SUM0 += sum0[i];
+            //    SUM1 += sum1[i];
+            //}
 
-            L_all[block*L_BLOCK + k]=log(SUM1)-log(SUM0);
+           //L_all[block*L_BLOCK + k]=log(SUM1)-log(SUM0);
+            L_all[block*L_BLOCK + k]= maxArray(tempSum1, 8) - maxArray(tempSum0, 8); 
             //L_e[block*L_BLOCK + k]=L_all[block*L_BLOCK + k]-2*msg[block*L_BLOCK + k]-L_a[block*L_BLOCK + k];
         }
 	}
@@ -1832,7 +1875,7 @@ int main(int argc, char* argv[])
     //cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
 	for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
-	//for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1){
+	//for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.5){
 		No = 1/pow(10.0,Eb_No_dB/10.0);
 		bits_all = 0;
 		for (i =0; i<MAXITER;i++) {
