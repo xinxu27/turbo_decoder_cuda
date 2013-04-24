@@ -1366,7 +1366,7 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 
 	// alloc memory,
 	__shared__ double Alpha[L_BLOCK][8];
-	__shared__ double Beta[8];
+	__shared__ double Beta[2][8];
 	__shared__ double sum0[8];
 	__shared__ double sum1[8];
 
@@ -1422,9 +1422,9 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 
 	// backward recursion,compute Beta
     if (index && block == BLOCK_NUM - 1 && thread != 0)
-        Beta[thread] = -INIFINITY;
+        Beta[1][thread] = -INIFINITY;
     else
-        Beta[thread] = 0;
+        Beta[1][thread] = 0;
 
 		sum0[thread] = 0;
         sum1[thread] = 0;
@@ -1432,8 +1432,8 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
             log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
         double gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][thread] + 
             L_a[block*L_BLOCK + L_BLOCK-1]-log(1+exp(L_a[block*L_BLOCK + L_BLOCK-1]));
-        sum0[thread] = exp(gamma0+Alpha[L_BLOCK-1][LastState[0][thread]]+Beta[thread]);
-        sum1[thread] = exp(gamma1+Alpha[L_BLOCK-1][LastState[1][thread]]+Beta[thread]);
+        sum0[thread] = exp(gamma0+Alpha[L_BLOCK-1][LastState[0][thread]]+Beta[1][thread]);
+        sum1[thread] = exp(gamma1+Alpha[L_BLOCK-1][LastState[1][thread]]+Beta[1][thread]);
 
         __syncthreads();
 
@@ -1459,13 +1459,15 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 				+L_a[block*L_BLOCK + k+1]-log(1+exp(L_a[block*L_BLOCK + k+1]));	// bit1 
 			sum=0.0;
 			for (s2=0;s2<NSTATE;s2++)
-				sum+=exp(gamma[s2]+Beta[s2]);
+				sum+=exp(gamma[s2]+Beta[1][s2]);
 			if (sum<MIN)
-				Beta[thread]=-INIFINITY;
+				Beta[0][thread]=-INIFINITY;
 			else
-				Beta[thread]=log(sum);
+				Beta[0][thread]=log(sum);
 
-			Beta[thread]=Beta[thread]-max_branch[k+1];
+            __syncthreads();
+
+			Beta[1][thread]=Beta[0][thread]-max_branch[k+1];
 
 		sum0[thread] = 0;
         sum1[thread] = 0;
@@ -1473,8 +1475,8 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
             log(1+exp(L_a[block*L_BLOCK + k]));
         double gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][thread] + 
             L_a[block*L_BLOCK + k]-log(1+exp(L_a[block*L_BLOCK + k]));
-        sum0[thread] = exp(gamma0+Alpha[k][LastState[0][thread]]+Beta[thread]);
-        sum1[thread] = exp(gamma1+Alpha[k][LastState[1][thread]]+Beta[thread]);
+        sum0[thread] = exp(gamma0+Alpha[k][LastState[0][thread]]+Beta[1][thread]);
+        sum1[thread] = exp(gamma1+Alpha[k][LastState[1][thread]]+Beta[1][thread]);
 
         __syncthreads();
 
