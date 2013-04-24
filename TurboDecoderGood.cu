@@ -1343,7 +1343,7 @@ __device__ double maxArray(double* arr, UINT length) {
 // LogMAP component decoder
 // index true decoder1 false decoder2
 //////////////////////////////////////////////////////////////////////
-__global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, bool index)
+__global__ void logmap(double *msg, double* parity, double* L_a, double* L_all)
 {
 
     const char NextOut[2][NSTATE] = // check bit based on current and input bit
@@ -1368,6 +1368,7 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 
     //const unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     const unsigned int block = blockIdx.x;
+	//const unsigned int decoderIndex = unsigned int(block/BLOCK_NUM);
     const unsigned int thread = threadIdx.x;
 
 	//UINT s2;
@@ -1392,7 +1393,7 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
     //double L_e[L_BLOCK];
 
 	// initialize Alpha & Beta
-	if (block == 0 && thread != 0) {
+	if ((block == 0 || block == BLOCK_NUM)&& thread != 0) {
 			Alpha[0][thread]=-INIFINITY;
 	}
 	else {
@@ -1445,7 +1446,7 @@ __global__ void logmap(double *msg, double *parity, double *L_a,double *L_all, b
 	}
 
 	// backward recursion,compute Beta
-    if (index && block == BLOCK_NUM - 1 && thread != 0)
+    if (block == BLOCK_NUM - 1 && thread != 0)
         Beta[1][thread] = -INIFINITY;
     else
         Beta[1][thread] = 0;
@@ -1554,12 +1555,14 @@ __global__ void interLeave(double * src, double * des){
     const int tid = blockIdx.x*blockDim.x + threadIdx.x;
     //des[tid] = src[interLeaveTable[tid]];
     des[tid] = src[(((263 + tid*480)%6144)*tid)%6144];
+    des[(((263 + tid*480)%6144)*tid)%6144 + 6144] = src[tid+6144];
 }
 
 __global__ void deInterLeave(double * src, double * des){
     const int tid = blockIdx.x*blockDim.x + threadIdx.x;
     //des[interLeaveTable[tid]] = src[tid];
     des[(((263 + tid*480)%6144)*tid)%6144] = src[tid];
+    des[tid + 6144] = src[(((263 + tid*480)%6144)*tid)%6144 + 6144];
 }
 
 __global__ void gammaAlpha(double * msg ,double * parity, double * L_a, double (*gamma)[8][8], BYTE (*lastState)[8],char (*lastOut)[8] ){
@@ -1776,10 +1779,11 @@ __global__ void LLRS(double * msg, double * parity, double * L_a, double (*Alpha
 
 __global__ void extrinsicInformation(double * L_all, double * msg, double * L_a, double * L_e) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    L_e[tid] = L_all[tid] - 2*msg[tid] - L_a[tid];
+    L_e[tid] = L_all[tid + 6144] - 2*msg[tid + 6144] - L_a[tid + 6144];
+    L_e[tid + 6144] = L_all[tid] - 2*msg[tid] - L_a[tid];
 }
 
-__global__ void demultiplex(double * stream, double * msg, double * parity0, double * parity1) {
+__global__ void demultiplex(double * stream, double * msg, double * parity) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     //if (puncture){// punctured rate=1/2
     //    msg[tid]=stream[2*tid];
@@ -1791,19 +1795,20 @@ __global__ void demultiplex(double * stream, double * msg, double * parity0, dou
     //    parity1[tid]=stream[3*tid+2];
     //}
         msg[tid]=stream[3*tid];
-        parity0[tid]=stream[3*tid+1];
-        parity1[tid]=stream[3*tid+2];
+        parity[tid]=stream[3*tid+1];
+        parity[6144+tid]=stream[3*tid+2];
 }
 
 __global__ void initializeExtrinsicInformation(double * L_e) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     L_e[tid] = 0;
+	L_e[6144+tid] = 0;
     
 }
 
 __global__ void exestimateInformationBits(double * L_all, BYTE * msghat) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    if(L_all[tid]>0)
+    if(L_all[tid + 6144]>0)
         //msghat[m_Inter_table[tid]]=1;
 		msghat[(((263 + tid*480)%6144)*tid)%6144] = 1;
     else
@@ -1852,25 +1857,26 @@ int main(int argc, char* argv[])
 
 	double * yDevice;
 	double * msgDevice;
-	double * imsgDevice;
+	//double * imsgDevice;
 	BYTE * mhatDevice;
-	double * parity0Device;
-	double * parity1Device;
+	//double * parity0Device;
+	//double * parity1Device;
+	double * parityDevice;
 	//UINT * tableDevice;
 	double * L_eDevice;
 	double * L_aDevice;
 	double * L_allDevice;
 
     cudaMalloc((void **)&yDevice, L_ALL*sizeof(double));
-    cudaMalloc((void **)&msgDevice, L_TOTAL*sizeof(double));
-    cudaMalloc((void **)&imsgDevice, L_TOTAL*sizeof(double));
+    cudaMalloc((void **)&msgDevice, L_TOTAL*2*sizeof(double));
+    //cudaMalloc((void **)&imsgDevice, L_TOTAL*sizeof(double));
     cudaMalloc((void **)&mhatDevice, L_TOTAL*sizeof(BYTE));
-    cudaMalloc((void **)&parity0Device, L_TOTAL*sizeof(double));
-    cudaMalloc((void **)&parity1Device, L_TOTAL*sizeof(double));
+    cudaMalloc((void **)&parityDevice, L_TOTAL*2*sizeof(double));
+    //cudaMalloc((void **)&parity1Device, L_TOTAL*sizeof(double));
     //cudaMalloc((void **)&tableDevice, L_TOTAL*sizeof(unsigned int));
-    cudaMalloc((void **)&L_eDevice, L_TOTAL*sizeof(double));
-    cudaMalloc((void **)&L_aDevice, L_TOTAL*sizeof(double));
-    cudaMalloc((void **)&L_allDevice, L_TOTAL*sizeof(double));
+    cudaMalloc((void **)&L_eDevice, L_TOTAL*2*sizeof(double));
+    cudaMalloc((void **)&L_aDevice, L_TOTAL*2*sizeof(double));
+    cudaMalloc((void **)&L_allDevice, L_TOTAL*2*sizeof(double));
 
     //cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
@@ -1902,23 +1908,23 @@ int main(int argc, char* argv[])
 
 			cudaMemcpy(yDevice,y,sizeof(double)*L_ALL, cudaMemcpyHostToDevice);
 
-			demultiplex<<<LEAVER_BLOCK,LEAVER_THREAD>>>(yDevice, msgDevice, parity0Device, parity1Device); 
-			interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(msgDevice, imsgDevice);
+			demultiplex<<<LEAVER_BLOCK,LEAVER_THREAD>>>(yDevice, msgDevice, parityDevice); 
+			//interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(msgDevice, imsgDevice);
 			initializeExtrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice);
 
 			for (int iter = 0; iter<MAXITER; iter++) {
 				
 				deInterLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
 
-                logmap<<<BLOCK_NUM, THREAD_NUM>>>(msgDevice, parity0Device, L_aDevice, L_allDevice, true);
+                logmap<<<BLOCK_NUM*2*2, THREAD_NUM>>>(msgDevice, parityDevice, L_aDevice, L_allDevice);
 
 				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
 
-				interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
+				//interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
 
-                logmap<<<BLOCK_NUM, THREAD_NUM>>>(imsgDevice, parity1Device, L_aDevice, L_allDevice, false);
+                //logmap<<<BLOCK_NUM, THREAD_NUM>>>(imsgDevice, parity1Device, L_aDevice, L_allDevice, false);
 
-				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, imsgDevice, L_aDevice, L_eDevice);
+				//extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, imsgDevice, L_aDevice, L_eDevice);
 
 				exestimateInformationBits<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, mhatDevice); 
 
@@ -1951,10 +1957,10 @@ int main(int argc, char* argv[])
 
 	cudaFree(yDevice);
 	cudaFree(msgDevice);
-	cudaFree(imsgDevice);
+	//cudaFree(imsgDevice);
 	cudaFree(mhatDevice);
-	cudaFree(parity0Device);
-	cudaFree(parity1Device);
+	//cudaFree(parity0Device);
+	cudaFree(parityDevice);
 	cudaFree(L_eDevice);
 	cudaFree(L_aDevice);
 	cudaFree(L_allDevice);
