@@ -32,8 +32,10 @@ using namespace std;
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 128
+#define BLOCK_NUM 64
 #define L_BLOCK L_TOTAL/BLOCK_NUM
+dim3 gridSize(2, BLOCK_NUM);
+//dim3 blockSize(8, 4)
 
 #define LEAVER_BLOCK 8
 #define LEAVER_THREAD 768
@@ -948,7 +950,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
     };
 
     //const unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    const unsigned int block = blockIdx.x;
+    const unsigned int block = blockIdx.x*BLOCK_NUM + blockIdx.y;
 	//const unsigned int decoderIndex = unsigned int(block/BLOCK_NUM);
     const unsigned int thread = threadIdx.x;
 
@@ -1180,7 +1182,7 @@ int main(int argc, char* argv[])
 				
 				deInterLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
 
-                logmap<<<BLOCK_NUM*2, THREAD_NUM>>>(msgDevice, parityDevice, L_aDevice, L_allDevice);
+                logmap<<<gridSize, THREAD_NUM>>>(msgDevice, parityDevice, L_aDevice, L_allDevice);
 
 				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
 
