@@ -27,12 +27,12 @@ using namespace std;
 
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
 #define MAXITER 5
-#define	FRAME_NUM 10
+#define	FRAME_NUM 1000
 #define AlphaBetaBLOCK_NUM 8
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 16
+#define BLOCK_NUM 128
 #define L_BLOCK L_TOTAL/BLOCK_NUM
 
 #define LEAVER_BLOCK 8
@@ -1881,8 +1881,8 @@ int main(int argc, char* argv[])
 
     //cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
-	//for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.5){
+	//for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
+	for (Eb_No_dB= -3.0;Eb_No_dB<5.0;Eb_No_dB+=0.1) {
 		No = 1/pow(10.0,Eb_No_dB/10.0);
 		bits_all = 0;
 		for (i =0; i<MAXITER;i++) {
