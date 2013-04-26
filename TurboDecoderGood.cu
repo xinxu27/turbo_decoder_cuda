@@ -35,7 +35,7 @@ using namespace std;
 #define BLOCK_NUM 64
 #define L_BLOCK L_TOTAL/BLOCK_NUM
 dim3 gridSize(2, BLOCK_NUM);
-//dim3 blockSize(8, 4)
+dim3 blockSize(8, 1);
 
 #define LEAVER_BLOCK 8
 #define LEAVER_THREAD 768
@@ -1182,7 +1182,7 @@ int main(int argc, char* argv[])
 				
 				deInterLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
 
-                logmap<<<gridSize, THREAD_NUM>>>(msgDevice, parityDevice, L_aDevice, L_allDevice);
+                logmap<<<gridSize, blockSize>>>(msgDevice, parityDevice, L_aDevice, L_allDevice);
 
 				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
 
