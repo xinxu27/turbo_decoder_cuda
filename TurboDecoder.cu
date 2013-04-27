@@ -26,13 +26,13 @@
 using namespace std;
 
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
-#define MAXITER 10
-#define	FRAME_NUM 10
+#define MAXITER 5
+#define	FRAME_NUM 1000
 #define AlphaBetaBLOCK_NUM 8
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 16 
+#define BLOCK_NUM 32 
 #define L_BLOCK L_TOTAL/BLOCK_NUM/4
 dim3 gridSize(2, BLOCK_NUM);
 dim3 blockSize(4, 8);
@@ -1118,6 +1118,9 @@ int main(int argc, char* argv[])
 	float * y;
 	BYTE * mhat;
 
+	clock_t start, finish;
+	long double duration[FRAME_NUM];
+
 	int frame;
 	UINT bits_all,bits_err[MAXITER],frame_err[MAXITER];
 	float Ber,Fer;
@@ -1127,6 +1130,7 @@ int main(int argc, char* argv[])
 	m = new BYTE[L_TOTAL];
 	x = new BYTE[L_ALL];
 	y = new float[L_ALL];
+	//cudaHostAlloc((void **)&y, sizeof(float)*L_ALL, 0);
 	mhat = new BYTE[L_TOTAL];
 
 	//init_Block_interleave_table();	// block interleave
@@ -1151,8 +1155,8 @@ int main(int argc, char* argv[])
 
     //cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
-	//for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
-	for (Eb_No_dB= -3.0;Eb_No_dB<2.0;Eb_No_dB+=0.5) {
+	for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
+	//for (Eb_No_dB= -3.0;Eb_No_dB<2.0;Eb_No_dB+=0.5) {
 		No = 1/pow(10.0,Eb_No_dB/10.0);
 		bits_all = 0;
 		for (i =0; i<MAXITER;i++) {
@@ -1177,6 +1181,8 @@ int main(int argc, char* argv[])
 				else
 					y[i]=-1.0+float(gaussian(No/2));
 
+
+			start = clock();
 			cudaMemcpy(yDevice,y,sizeof(float)*L_ALL, cudaMemcpyHostToDevice);
 
 			demultiplex<<<LEAVER_BLOCK,LEAVER_THREAD>>>(yDevice, msgDevice, parityDevice); 
@@ -1199,10 +1205,15 @@ int main(int argc, char* argv[])
 
 				exestimateInformationBits<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, mhatDevice); 
 
-				cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
-				countErrors(m, mhat, bits_err, frame_err, iter);
+				//cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
+				//countErrors(m, mhat, bits_err, frame_err, iter);
 
 			}
+			finish = clock();
+			duration[frame] = (long double)(finish - start);
+
+			cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
+			countErrors(m, mhat, bits_err, frame_err, MAXITER-1);
 
 		}
 
@@ -1216,6 +1227,16 @@ int main(int argc, char* argv[])
 			printf("Iteration:%d\n",i+1);
 			printf("---Ber=%f\n---Fer=%f\n",Ber,Fer);
 		}
+
+		long double durationSum = 0.0;
+		for (i = 0; i < FRAME_NUM; i++) {
+			durationSum += duration[i];
+		}
+		durationSum /= CLOCKS_PER_SEC;
+
+		long double throughput = FRAME_NUM*6144 / durationSum / 1000000;
+		cout<<"throughput: "<<throughput<<"Mbps"<<endl;
+			
 	}
 
 	delete m;
@@ -1223,6 +1244,7 @@ int main(int argc, char* argv[])
 	delete y;
 	delete mhat;
 
+	//cudaFree(y);
 	cudaFree(yDevice);
 	cudaFree(msgDevice);
 	cudaFree(mhatDevice);
