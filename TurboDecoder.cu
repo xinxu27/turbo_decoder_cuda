@@ -32,7 +32,7 @@ using namespace std;
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 16 
+#define BLOCK_NUM 8 
 #define L_BLOCK L_TOTAL/BLOCK_NUM/4
 dim3 gridSize(2, BLOCK_NUM);
 dim3 blockSize(4, 8);
