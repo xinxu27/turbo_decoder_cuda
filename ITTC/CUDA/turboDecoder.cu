@@ -149,7 +149,7 @@ int main(int argc, char* argv[])
 	double *modulated_source_i, *modulated_source_q;
 
 	double *after_channel_i,*after_channel_q;
-	double *flow_for_decode = NULL;
+	float *flow_for_decode = NULL;
 	int *flow_decoded = NULL;
 
 	double EbN0dB,sigma;
@@ -218,7 +218,7 @@ int main(int argc, char* argv[])
 	  exit(1);  
 	}
 
-	if ((flow_for_decode=(double *)malloc((3*source_length+4*M_num_reg)*sizeof(double)))==NULL)
+	if ((flow_for_decode=(float *)malloc((3*source_length+4*M_num_reg)*sizeof(float)))==NULL)
 	{
 	  printf("\n fail to allocate memory of flow_for_decode \n");
 	  exit(1);  
@@ -1455,7 +1455,7 @@ void Log_MAP_decoder(double *recs_turbo, double *La_turbo, int terminated, doubl
 返回值:
 	无．
 ---------------------------------------------------------------*/
-void demultiplex(double *rec_turbo, int len_info, double *yk_turbo)
+void demultiplex(float *rec_turbo, int len_info, double *yk_turbo)
 {
 	int i;			/* 循环变量 */
 
@@ -1518,7 +1518,7 @@ void demultiplex(double *rec_turbo, int len_info, double *yk_turbo)
 返回值:
 	无
 ---------------------------------------------------------------*/
-void TurboDecoding(double *flow_for_decode, int *flow_decoded,int flow_length)
+void TurboDecoding(float *flow_for_decode, int *flow_decoded,int flow_length)
 {
 	int i;							/* 循环变量 */
 	int length_info, length_total;	/* 信息位长和总长度 */
@@ -1809,7 +1809,7 @@ void module(int * a,double * outi,double * outq,int N, int modu_index)
 
 
 void _bpsk_demodule(double *symbol_i, double *symbol_q, int symbol_len,
-					double *out,double Kf)
+					float *out,double Kf)
 {
 	int i,j;
 	double min_sqr_dis1,min_sqr_dis2,sqr_dis1,sqr_dis2;
@@ -1845,7 +1845,7 @@ void _bpsk_demodule(double *symbol_i, double *symbol_q, int symbol_len,
 	}
 }
 
-void demodule(double *symbol_i, double *symbol_q, int symbol_len,double* out,double Kf,int modu_index)
+void demodule(double *symbol_i, double *symbol_q, int symbol_len,float* out,double Kf,int modu_index)
 {
     switch(modu_index)
 	{

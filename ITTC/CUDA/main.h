@@ -14,9 +14,9 @@ void TurboCodingInit();
 void TurboEnCoding(int *source, int *coded_source, int source_length);
 void module(int * a,double * outi,double * outq,int N, int modu_index);
 void AWGN(double *send, double *r, double sigma, int totallength);
-void demodule(double *symbol_i, double *symbol_q, int symbol_len,double* out,double Kf,int modu_index);
+void demodule(double *symbol_i, double *symbol_q, int symbol_len,float* out,double Kf,int modu_index);
 
-void TurboDecoding(double *flow_for_decode, int *flow_decoded,int flow_length);
+void TurboDecoding(float *flow_for_decode, int *flow_decoded,int flow_length);
 
 void TurboCodingRelease();
 
