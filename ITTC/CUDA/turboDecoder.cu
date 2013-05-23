@@ -123,61 +123,6 @@ double _bpsk_map_q[2]=
 	0,0
 };
 
-double _qpsk_map_i[4]=
-{
-	0.7071,0.7071,-0.7071,-0.7071
-};
-
-double _qpsk_map_q[4]=
-{
-	0.7071,-0.7071,0.7071,-0.7071
-};
-double _8psk_map_i[8]=
-{
-	-0.7071,-1,0,0.7071,0,-0.7071,0.7071,1
-};
-
-double _8psk_map_q[8]=
-{
-	0.7071,0,1,0.7071,-1,-0.7071,-0.7071,0
-};
-double _16QAM_map_i[16]=
-{
-	-0.948683,-0.948683,-0.948683,-0.948683,
-	-0.316228,-0.316228,-0.316228,-0.316228,
-	0.948683,0.948683,0.948683,0.948683,
-	0.316228,0.316228,0.316228,0.316228,
-};
-
-double _16QAM_map_q[16]=
-{
-	-0.948683,-0.316228,0.948683,0.316228,
-	-0.948683,-0.316228,0.948683,0.316228,
-	-0.948683,-0.316228,0.948683,0.316228,
-	-0.948683,-0.316228,0.948683,0.316228,
-
-};
-double _64QAM_map_i[64]=
-	{
-	   0.4629,0.4629,0.4629,0.4629,0.4629,0.4629,0.4629,0.4629,0.1543,0.1543,0.1543,0.1543,0.1543,0.1543,0.1543,0.1543,
-	   0.7615,0.7615,0.7615,0.7615,0.7615,0.7615,0.7615,0.7615,1.0801,1.0801,1.0801,1.0801,1.0801,1.0801,1.0801,1.0801,
-	   -0.4629,-0.4629,-0.4629,-0.4629,-0.4629,-0.4629,-0.4629,-0.4629,-0.1543,-0.1543,-0.1543,-0.1543,-0.1543,-0.1543,-0.1543,-0.1543,
-	   -0.7615,-0.7615,-0.7615,-0.7615,-0.7615,-0.7615,-0.7615,-0.7615,-1.0801,-1.0801,-1.0801,-1.0801,-1.0801,-1.0801,-1.0801,-1.0801
-	
-	
-	};
-
-
-double _64QAM_map_q[64]=
-	{
-	    0.4629,0.1543,0.7615,1.0801,-0.4629,-0.1543,-0.7615,-1.0801,0.4629,0.1543,0.7615,1.0801,-0.4629,-0.1543,-0.7615,-1.0801,
-	    0.4629,0.1543,0.7615,1.0801,-0.4629,-0.1543,-0.7615,-1.0801,0.4629,0.1543,0.7615,1.0801,-0.4629,-0.1543,-0.7615,-1.0801,
-	    0.4629,0.1543,0.7615,1.0801,-0.4629,-0.1543,-0.7615,-1.0801,0.4629,0.1543,0.7615,1.0801,-0.4629,-0.1543,-0.7615,-1.0801,
-	    0.4629,0.1543,0.7615,1.0801,-0.4629,-0.1543,-0.7615,-1.0801,0.4629,0.1543,0.7615,1.0801,-0.4629,-0.1543,-0.7615,-1.0801
-	
-	
-	};
-
 int main(int argc, char* argv[])
 {
 	MODULATION = 1;			//调制阶数：1,2,3,4,6
@@ -186,7 +131,6 @@ int main(int argc, char* argv[])
 	//SYMBOL_NUM=length_after_code/MODULATION;//  atoi(argv[4]);//672
 	SYMBOL_NUM=length_after_code;
 
-	
 	f1 =263;
 	f2 =480; 					//与码长有关的交织器参数
 
@@ -195,7 +139,6 @@ int main(int argc, char* argv[])
 	double EbN0step =0.2;		//仿真信噪比步长
 	int FrameNum=100;	
 		
-	//rate=(double)source_length/(double)length_after_code;
 	double rate = (double)source_length/(double)(SYMBOL_NUM);
 
 
@@ -348,19 +291,6 @@ findCudaDevice(argc, (const char **)argv);
 			demodule(after_channel_i, after_channel_q, SYMBOL_NUM,flow_for_decode,1/(2*pow(sigma,2)),MODULATION);
 
 /*******************************************************************************/
-
-		/*ofstream flow_for_decode_f("flow_for_decode.txt");
-		for(int j=0;j<3*source_length+4*M_num_reg;j++)
-		{
-			flow_for_decode_f << flow_for_decode[j] << endl;
-		}*/
-
-			ifstream flow_for_decode_reader("flow_for_decode.txt");
-			for (int j=0; j<3*source_length+4*M_num_reg; j++) 
-			{
-				flow_for_decode_reader >> flow_for_decode[j];
-			}
-
 
 			cudaMemcpy(yDevice,flow_for_decode,sizeof(float)*length_after_code, cudaMemcpyHostToDevice);
 
@@ -1290,23 +1220,6 @@ double E_algorithm_seq(double *data_seq, int length)
 	return temp;
 }
 
-
-/*---------------------------------------------------------------
-函数:
-	void decision(double *LLR_seq, int length, int *output)
-介绍:
-	判决.
-参数:
-	输入参数:
-		LLR_seq - LLR序列首址.
-		length - 序列长度
-	输出参数:
-		output - 判决后输出序列首址
-返回值:
-	无．
----------------------------------------------------------------*/
-
-
 /*---------------------------------------------------------------
 函数:
 	void decision(double *LLR_seq, int length, int *output)
@@ -1727,17 +1640,12 @@ void TurboDecoding(double *flow_for_decode, int *flow_decoded,int flow_length)
 	}
 	
 	/* 对全部似然比判决 */
-
-	
-
-
 	free(receive_punc);
 	free(yk_turbo);
 
 	free(La_turbo);
 	free(Le_turbo);
 	free(LLR_all_turbo);
-
 	free(tempout);
 }
 
@@ -1783,23 +1691,18 @@ void dectobin(double *flow_for_change, int *flow_changed, int flow_len, int inte
 	for (i=0; i<flow_len; i++) flow_changed_f << flow_changed[i] << endl;
 
 	flow_changed_f<< "-----flow_changed文件结束-----" << endl;*/
-
-
 }
-
 
 
 void TurboCodingRelease()
 {
 	/* 释放生成阵内存 */
 	free(turbo_g.g_matrix);
-
 	/* 释放trellis结构内存 */
 	free(turbo_trellis.mx_lastout);
 	free(turbo_trellis.mx_laststat);
 	free(turbo_trellis.mx_nextout);
 	free(turbo_trellis.mx_nextstat);
-
 	/* 释放随机交织器内存 */
 	free(index_randomintlvr);
 	free(index_randomintlvr2);
