@@ -25,3 +25,4 @@ void de_rate_match(double*input,double*output,int in_len,int out_len);
 
 
 void countErrors(BYTE *m, BYTE * mhat, UINT * bitsError, UINT * frameError, UINT iter);
+__global__ void demultiplex(float * stream, float * msg, float * parity);

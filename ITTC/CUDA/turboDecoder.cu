@@ -8,7 +8,9 @@
 #include <time.h>
 using namespace std;
 
+#define M	3	// register length,=tail length
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
+#define L_TOTAL_NUM  (L_TOTAL+M)
 #define MAXITER 6
 #define	FRAME_NUM 10000
 #define AlphaBetaBLOCK_NUM 8
@@ -22,9 +24,8 @@ dim3 blockSize(4, 8);
 
 #define LEAVER_BLOCK 8
 #define LEAVER_THREAD 768
-#define M	3	// register length,=tail length
 #define NSTATE	8	// = M^2
-#define L_ALL 3*L_TOTAL	// coded frame length
+#define L_ALL (3*L_TOTAL+4*M)	// coded frame length
 
 /*==================================================*/
 /* 仿真参数 */
@@ -184,7 +185,7 @@ double _64QAM_map_q[64]=
 	
 	};
 
-int main()
+int main(int argc, char* argv[])
 {
 	MODULATION = 1;			//调制阶数：1,2,3,4,6
 	source_length = 6144;			//输入信源长度
@@ -328,6 +329,24 @@ int main()
 	
 	srand((unsigned)time(NULL));
 
+findCudaDevice(argc, (const char **)argv);
+
+	float * yDevice;
+	float * msgDevice;
+	BYTE * mhatDevice;
+	float * parityDevice;
+	float * L_eDevice;
+	float * L_aDevice;
+	float * L_allDevice;
+
+    cudaMalloc((void **)&yDevice, L_ALL*sizeof(float));
+    cudaMalloc((void **)&msgDevice, L_TOTAL_NUM*2*sizeof(float));
+    cudaMalloc((void **)&mhatDevice, L_TOTAL*sizeof(BYTE));
+    cudaMalloc((void **)&parityDevice, L_TOTAL_NUM*2*sizeof(float));
+    cudaMalloc((void **)&L_eDevice, L_TOTAL*2*sizeof(float));
+    cudaMalloc((void **)&L_aDevice, L_TOTAL*2*sizeof(float));
+    cudaMalloc((void **)&L_allDevice, L_TOTAL*2*sizeof(float));
+
 	for (EbN0dB=EbN0start; EbN0dB<=EbN0end; EbN0dB+=EbN0step)
 	{
 		sigma = pow(10,-EbN0dB/20)*sqrt(0.5/(rate*MODULATION));
@@ -369,38 +388,42 @@ int main()
 			flow_for_decode_f << flow_for_decode[j] << endl;
 		}*/
 
-		ifstream flow_for_decode_reader("flow_for_decode.txt");
-		for (int j=0; j<3*source_length+4*M_num_reg; j++) 
-		{
-			flow_for_decode_reader >> flow_for_decode[j];
-		}
-
-
-
-		TurboDecoding(flow_for_decode, flow_decoded, 3*source_length+4*M_num_reg);
-			
-
-		for(i2=0;i2<N_ITERATION;i2++)
-		{
-				temp[i2] = err_bit_num[i2];
-			
-				for (i1=0; i1<source_length; i1++)
-				{
-					if (*(source+i1) != *(flow_decoded+i2*source_length+i1))
-					{
-						err_bit_num[i2] = err_bit_num[i2]+1;
-					}
-				}
-				if(temp[i2]!=err_bit_num[i2])
-					err_block_num[i2]++;
+			ifstream flow_for_decode_reader("flow_for_decode.txt");
+			for (int j=0; j<3*source_length+4*M_num_reg; j++) 
+			{
+				flow_for_decode_reader >> flow_for_decode[j];
 			}
-			
-				if(err_block_num[N_ITERATION-1]>=50)//错够1000个块，跳出
-				{
-					nf++;
-					break;
-				}
-		}
+
+
+			cudaMemcpy(yDevice,flow_for_decode,sizeof(float)*length_after_code, cudaMemcpyHostToDevice);
+
+			demultiplex<<<LEAVER_BLOCK,LEAVER_THREAD>>>(yDevice, msgDevice, parityDevice); 
+
+			TurboDecoding(flow_for_decode, flow_decoded, 3*source_length+4*M_num_reg);
+				
+
+			for(i2=0;i2<N_ITERATION;i2++)
+			{
+					temp[i2] = err_bit_num[i2];
+				
+					for (i1=0; i1<source_length; i1++)
+					{
+						if (*(source+i1) != *(flow_decoded+i2*source_length+i1))
+						{
+							err_bit_num[i2] = err_bit_num[i2]+1;
+						}
+					}
+					if(temp[i2]!=err_bit_num[i2])
+						err_block_num[i2]++;
+			}
+				
+			if(err_block_num[N_ITERATION-1]>=50)//错够1000个块，跳出
+			{
+				nf++;
+				break;
+			}
+		}//FrameNum
+
 		for(i2=0;i2<N_ITERATION;i2++)		
 		{
 			err_bit_rate[result_num*N_ITERATION+i2] = (double)err_bit_num[i2]/(nf*source_length);
@@ -422,7 +445,8 @@ int main()
 		printf("\n");
 		result_num++;
 
-	}
+	}//Eb/No
+
     fprintf(fp,"%s ","N_ITERATION=1");
 	if (EbN0dB>EbN0end)
 	{
@@ -488,7 +512,15 @@ fprintf(fp,"----------------------------------------------------------");
 	//free(received_punced_source);
 	free(flow_for_decode);
 	free(flow_decoded);
-}
+
+	cudaFree(yDevice);
+	cudaFree(msgDevice);
+	cudaFree(mhatDevice);
+	cudaFree(parityDevice);
+	cudaFree(L_eDevice);
+	cudaFree(L_aDevice);
+	cudaFree(L_allDevice);
+} //main
 
 
 void randominterleaver_long(long *data_unintlvr, long *interleaverddata, int *index_randomintlvr, int length)
