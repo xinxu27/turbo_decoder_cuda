@@ -102,13 +102,6 @@ const double lookup_index_Log_MAP[16] = {0.0, 0.08824, 0.19587, 0.31026, 0.43275
 								2.2522, 2.9706, 3.6764, 4.3758};
 const double lookup_table_Log_MAP[16] = {0.69315, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4, 0.35,
 								0.3, 0.25, 0.2, 0.15, 0.1, 0.05, 0.025, 0.0125};
-
-/* Log-MAP算法用到的查找表 */
-const long lookup_index_Log_MAP_fix[9] = {0,1,2,3,4,5,6,7,8};
-const long lookup_table_Log_MAP_fix[9] = {3,2,2,2,1,1,1,1,1};
-
-//const long lookup_index_Log_MAP_fix[9] = {0,1,2,3,4,5,6,7,8};
-//const long lookup_table_Log_MAP_fix[9] = {0,0,0,0,0,0,0,0,0};
 /*==================================================*/
 /* 与生成阵相关的参数 */
 int M_num_reg = COLUMN_OF_G-1;		/* 寄存器数 */
@@ -201,8 +194,6 @@ int main(int argc, char* argv[])
 	double EbN0end = 2;//4;		//最大仿真终止信噪比
 	double EbN0step =0.2;		//仿真信噪比步长
 	int FrameNum=100;	
-
-	int floatorfix = 0;//1-fix,0-float
 		
 	//rate=(double)source_length/(double)length_after_code;
 	double rate = (double)source_length/(double)(SYMBOL_NUM);
@@ -211,12 +202,10 @@ int main(int argc, char* argv[])
 	int *source = NULL;
 
 	int *coded_source = NULL;
-	int *punced_source = NULL;
-// int out_len;
+
 	double *modulated_source_i, *modulated_source_q;
 
 	double *after_channel_i,*after_channel_q;
-	double *received_punced_source = NULL;
 	double *flow_for_decode = NULL;
 	int *flow_decoded = NULL;
 
@@ -236,20 +225,11 @@ int main(int argc, char* argv[])
 	    return 0;
 	}
 
-	//fprintf(fp,"\n%s","MCS = ");
-	//fprintf(fp,"%d", MCS);
-
 	fprintf(fp,"\n%s","MODULATION = ");
 	fprintf(fp,"%d", MODULATION);
 
-	//fprintf(fp,"\n%s","RB = ");
-	//fprintf(fp,"%d", RB);
-
 	fprintf(fp,"\n%s","source_length = ");
 	fprintf(fp,"%d", source_length);
-
-	//fprintf(fp,"\n%s","transport_bit_length = ");
-	//fprintf(fp,"%d", length_after_code);
 	
 	fprintf(fp,"\n%s","rate_coding = ");
 	fprintf(fp,"%f",  rate);
@@ -260,8 +240,6 @@ int main(int argc, char* argv[])
 
 	fprintf(fp,"\n%s", "SNR_step=");
 	fprintf(fp,"%f", EbN0step);
-
-
 
 	TurboCodingInit();
 			
@@ -275,11 +253,7 @@ int main(int argc, char* argv[])
 	  printf("\n fail to allocate memory of coded_source \n");
 	  exit(1);  
 	}
-	/*if ((punced_source=(int *)malloc((int)(SYMBOL_NUM*MODULATION)*sizeof(int)))==NULL)
-	{
-	  printf("\n fail to allocate memory of punced_source \n");
-	  exit(1);  
-	}*/
+
 	if ((modulated_source_i=(double *)malloc((int)(SYMBOL_NUM)*sizeof(double)))==NULL)
 	{
 	  printf("\n fail to allocate memory of modulated_source_i \n");
@@ -300,11 +274,7 @@ int main(int argc, char* argv[])
 	  printf("\n fail to allocate memory of after_channel_q \n");
 	  exit(1);  
 	}
-	/*if ((received_punced_source=(double *)malloc((int)(SYMBOL_NUM*MODULATION)*sizeof(double)))==NULL)
-	{
-	  printf("\n fail to allocate memory of received_punced_source \n");
-	  exit(1);  
-	}*/
+
 	if ((flow_for_decode=(double *)malloc((3*source_length+4*M_num_reg)*sizeof(double)))==NULL)
 	{
 	  printf("\n fail to allocate memory of flow_for_decode \n");
@@ -361,7 +331,6 @@ findCudaDevice(argc, (const char **)argv);
 			for(i1=0; i1<source_length; i1+=1)
 			{
 				*(source+i1)=rand()%2;
-				//*(source+i1)=(int)(rand()/16384);
 			}
 
 
@@ -370,16 +339,14 @@ findCudaDevice(argc, (const char **)argv);
             TurboEnCoding(source, coded_source, source_length);
 
 /*******************************************************************************/
-			//rate match
-			//rate_match(coded_source,3*source_length+4*M_num_reg,punced_source,length_after_code);
+
 			module(coded_source,modulated_source_i,modulated_source_q,SYMBOL_NUM*MODULATION,MODULATION);
 
 			AWGN(modulated_source_i, after_channel_i, sigma, SYMBOL_NUM);
 			AWGN(modulated_source_q, after_channel_q, sigma, SYMBOL_NUM);
 
 			demodule(after_channel_i, after_channel_q, SYMBOL_NUM,flow_for_decode,1/(2*pow(sigma,2)),MODULATION);
-			//de rate match
-			//de_rate_match(received_punced_source,flow_for_decode,length_after_code,3*source_length+4*M_num_reg);
+
 /*******************************************************************************/
 
 		/*ofstream flow_for_decode_f("flow_for_decode.txt");
@@ -504,12 +471,10 @@ fprintf(fp,"----------------------------------------------------------");
 
 	free(source);
 	free(coded_source);
-	//free(punced_source);
 	free(modulated_source_i);
 	free(modulated_source_q);
 	free(after_channel_i);
 	free(after_channel_q);
-	//free(received_punced_source);
 	free(flow_for_decode);
 	free(flow_decoded);
 
@@ -1250,6 +1215,7 @@ double get_max(double *data_seq, int length)
 			temp = *(data_seq+i);
 		}
 	}
+
 	return temp;
 }
 
@@ -1309,6 +1275,7 @@ double E_algorithm(double x, double y)
 返回值:
 	结果．
 ---------------------------------------------------------------*/
+
 double E_algorithm_seq(double *data_seq, int length)
 {
 	int i;			/* 循环变量 */
@@ -1928,85 +1895,11 @@ void _bpsk_module(int * a,double * outi,double * outq,int N)
 }
 
 
-
-
-void _qpsk_module(int * a,double * outi,double * outq,int N)
-{
-	int n=N/2;
-
-	int temp,i;
-
-	for (i=0;i<n;i++)
-	{    
-		temp=(*(a+i*2))*2+(*(a+i*2+1));
-			
-		*(outi+i)=*(_qpsk_map_i+temp);
-			
-		*(outq+i)=*(_qpsk_map_q+temp);
-	}
- 
-}
-
-
-
-
-void _8psk_module(int * a,double * outi,double * outq,int N)
-{
-	int n=N/3;
-
-	int temp,i;
-	
-	for (i=0;i<n;i++)
-	{    
-		temp=((*(a+i*3+2))*4+(*(a+i*3+1))*2+*(a+i*3));
-			
-		*(outi+i)=*(_8psk_map_i+temp);
-			
-		*(outq+i)=*(_8psk_map_q+temp);
-	} 
-}
-
-
-
-void _16qam_module(int * a,double * outi,double * outq,int N)
-{
-	int n=N/4;
-	int temp,i;
-	for (i=0;i<n;i++)
-	{    
-		temp=(*(a+i*4))*8+(*(a+i*4+1))*4+(*(a+i*4+2))*2+*(a+i*4+3);
-			
-		*(outi+i)=*(_16QAM_map_i+temp);
-			
-		*(outq+i)=*(_16QAM_map_q+temp);
-	}
-}
-void _64qam_module(int * a,double * outi,double * outq,int N)
-{
-	int n=N/6;
-	int temp,i;
-	for (i=0;i<n;i++)
-	{    
-	     
-		temp=(*(a+i*6))*32+(*(a+i*6+1))*16+(*(a+i*6+2))*8+*(a+i*6+3)*4+*(a+i*6+4)*2+*(a+i*6+5);
-			
-		*(outi+i)=*(_64QAM_map_i+temp);
-			
-		*(outq+i)=*(_64QAM_map_q+temp);
-	}
-}
-
-
-
 void module(int * a,double * outi,double * outq,int N, int modu_index)
 {
 	switch (modu_index)
 	{
 	    case 1: _bpsk_module(a,outi,outq,N);break;
-		case 2: _qpsk_module(a,outi,outq,N);break;
-	    case 3: _8psk_module(a,outi,outq,N);break;
-		case 4: _16qam_module(a,outi,outq,N);break;
-		case 6: _64qam_module(a,outi,outq,N);break;
 	}
 
 }
@@ -2049,464 +1942,11 @@ void _bpsk_demodule(double *symbol_i, double *symbol_q, int symbol_len,
 	}
 }
 
-
-
-void _qpsk_demodule(double *symbol_i, double *symbol_q, int symbol_len,
-					double *out,double Kf)
-{
-	int i,j;
-	double min_sqr_dis1,min_sqr_dis2,sqr_dis1,sqr_dis2;
-
-	for(i=0;i<symbol_len;i++)
-	{
-	/*the minimum square distance has nothing with the orders of calculation of sqr_dis1 and sqr_dis2*/
-
-		min_sqr_dis1=0x7fffffffffff,min_sqr_dis2=0x7fffffffffff;
-
-        for(j=0;j<4;j++)
-		{
-			if(j&2)
-			{
-			/*calculate Min{dj} where j in Sj*/
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_qpsk_map_i[j],(double)_qpsk_map_q[j]);
-	
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_qpsk_map_i[j],(double)_qpsk_map_q[j]);
-
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-		}
-
-		out[2*i]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-
-		min_sqr_dis1=0x7fffffffffff,min_sqr_dis2=0x7fffffff;
-
-		for(j=0;j<4;j++)
-		{
-			if(j&1)
-			{
-			/*calculate Min{dj} where j in Sj*/
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_qpsk_map_i[j],(double)_qpsk_map_q[j]);
-	
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_qpsk_map_i[j],(double)_qpsk_map_q[j]);
-
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-
-		out[2*i+1]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-	}
-}
-
-void _8psk_demodule(double *symbol_i, double *symbol_q, int symbol_len,
-					double *out,double Kf)
-{
-	int i,j;
-	double min_sqr_dis1,min_sqr_dis2,sqr_dis1,sqr_dis2;
-
-	for(i=0;i<symbol_len;i++)
-	{
-	/*the minmun square distance has nothing with the orders of calculation of sqr_dis1 and sqr_dis2*/
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-
-		for(j=0;j<8;j++)
-		{
-			if(j&4)
-			{
-			/*calculate Min{dj} where j in Sj*/
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_8psk_map_i[j],(double)_8psk_map_q[j]);
-	
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_8psk_map_i[j],(double)_8psk_map_q[j]);
-
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-
-		out[3*i+2]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-
-		for(j=0;j<8;j++)
-		{
-			if(j&2)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_8psk_map_i[j],(double)_8psk_map_q[j]);	
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_8psk_map_i[j],(double)_8psk_map_q[j]);	
-
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[3*i+1]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-		
-		for(j=0;j<8;j++)
-		{
-			if(j&1)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_8psk_map_i[j],(double)_8psk_map_q[j]);					
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_8psk_map_i[j],(double)_8psk_map_q[j]);	
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[3*i ]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-	}
-}
-
-void _16qam_demodule(double *symbol_i, double *symbol_q, int symbol_len,
-					double* out,double Kf)
-{
-    int i,j;
-	double min_sqr_dis1,min_sqr_dis2,sqr_dis1,sqr_dis2;
-
-	for(i=0;i<symbol_len;i++)
-	{
-	/*the minmun square distance has nothing with the orders of calculation of sqr_dis1 and sqr_dis2*/
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-
-		for(j=0;j<16;j++)
-		{
-			if(j&8)
-			{
-			/*calculate Min{dj} where j in Sj*/
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_16QAM_map_i[j],(double)_16QAM_map_q[j]);
-	
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_16QAM_map_i[j],(double)_16QAM_map_q[j]);
-
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-
-		out[4*i]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-
-		for(j=0;j<16;j++)
-		{
-			if(j&4)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_16QAM_map_i[j],(double)_16QAM_map_q[j]);	
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_16QAM_map_i[j],(double)_16QAM_map_q[j]);	
-
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[4*i+1]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-		
-		for(j=0;j<16;j++)
-		{
-			if(j&2)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_16QAM_map_i[j],(double)_16QAM_map_q[j]);					
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_16QAM_map_i[j],(double)_16QAM_map_q[j]);	
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[4*i+2]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-
-		for(j=0;j<16;j++)
-		{
-			if(j&1)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_16QAM_map_i[j],(double)_16QAM_map_q[j]);					
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_16QAM_map_i[j],(double)_16QAM_map_q[j]);	
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[4*i+3]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-	}
-}   
-
-
-void _64qam_demodule(double *symbol_i, double *symbol_q, int symbol_len,
-					double* out,double Kf)
-{
-	int i,j;
-	double min_sqr_dis1,min_sqr_dis2,sqr_dis1,sqr_dis2;
-
-	for(i=0;i<symbol_len;i++)
-	{
-	/*the minmun square distance has nothing with the orders of calculation of sqr_dis1 and sqr_dis2*/
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-
-		for(j=0;j<64;j++)
-		{
-			if(j&32)
-			{
-			/*calculate Min{dj} where j in Sj*/
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);
-	
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);
-
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-
-		out[6*i]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-
-		for(j=0;j<64;j++)
-		{
-			if(j&16)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);	
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);	
-
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[6*i+1]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-		
-		for(j=0;j<64;j++)
-		{
-			if(j&8)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);					
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);	
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[6*i+2]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-
-		for(j=0;j<64;j++)
-		{
-			if(j&4)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);					
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);	
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[6*i+3]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-		
-		for(j=0;j<64;j++)
-		{
-			if(j&2)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);					
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);	
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[6*i+4]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-
-		min_sqr_dis1=0x7fffffff,min_sqr_dis2=0x7fffffff;
-		
-		for(j=0;j<64;j++)
-		{
-			if(j&1)
-			{
-				/*calculate Min{dj} where j in Sj*/		
-			sqr_dis1=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);					
-
-			if(sqr_dis1<min_sqr_dis1)
-				min_sqr_dis1=sqr_dis1;
-			}
-
-			else
-			{
-				/*calculate Min{dj} where j in complement of Sj*/	
-			sqr_dis2=calculate_sqr_dis(symbol_i[i],symbol_q[i],(double)_64QAM_map_i[j],(double)_64QAM_map_q[j]);	
-			if(sqr_dis2<min_sqr_dis2)
-				min_sqr_dis2=sqr_dis2;
-
-			}
-
-
-		}
-		out[6*i+5]=-Kf*(min_sqr_dis1-min_sqr_dis2);
-	
-	
-
-
-	}
-
-
-}
-
-
 void demodule(double *symbol_i, double *symbol_q, int symbol_len,double* out,double Kf,int modu_index)
 {
     switch(modu_index)
 	{
 	    case 1: _bpsk_demodule(symbol_i, symbol_q,symbol_len,out,Kf);break;
-		case 2: _qpsk_demodule(symbol_i, symbol_q,symbol_len,out,Kf);break;
-	    case 3: _8psk_demodule(symbol_i, symbol_q,symbol_len,out,Kf);break;
-		case 4: _16qam_demodule(symbol_i, symbol_q,symbol_len,out,Kf);break;
-		case 6: _64qam_demodule(symbol_i, symbol_q,symbol_len,out,Kf);break;
-		default:printf("please input the number between 1 and 6.");
 	}
 }
 
