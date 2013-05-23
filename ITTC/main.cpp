@@ -39,7 +39,7 @@ int main()
 	double EbN0start = 0;//0;		//仿真起始信噪比
 	double EbN0end = 2;//4;		//最大仿真终止信噪比
 	double EbN0step =0.2;		//仿真信噪比步长
-	int FrameNum=1000000;	
+	int FrameNum=100000;	
 
 	int floatorfix = 0;//1-fix,0-float
 		
