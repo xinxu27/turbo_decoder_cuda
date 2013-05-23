@@ -3,6 +3,13 @@
 #include <math.h>
 #include <time.h>
 
+typedef unsigned char BYTE;
+typedef int INT;
+typedef unsigned int UINT;
+typedef int BOOL;
+
+#define INIFINITY  1E+10
+
 void TurboCodingInit();
 void TurboEnCoding(int *source, int *coded_source, int source_length);
 void module(int * a,double * outi,double * outq,int N, int modu_index);
@@ -15,3 +22,6 @@ void TurboDecodingfixpoint(double *flow_for_decode, int *flow_decoded,int flow_l
 void TurboCodingRelease();
 void rate_match(int* input,int in_len,int*output,int out_len);
 void de_rate_match(double*input,double*output,int in_len,int out_len);
+
+
+void countErrors(BYTE *m, BYTE * mhat, UINT * bitsError, UINT * frameError, UINT iter);
