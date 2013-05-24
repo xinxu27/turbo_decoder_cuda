@@ -17,7 +17,7 @@ using namespace std;
 #define AlphaBetaTHREAD_NUM 8
 
 #define THREAD_NUM 8
-#define BLOCK_NUM 8 
+#define BLOCK_NUM 64
 #define L_BLOCK L_TOTAL/BLOCK_NUM/4
 dim3 gridSize(2, BLOCK_NUM);
 dim3 blockSize(4, 8);
@@ -122,7 +122,269 @@ double _bpsk_map_q[2]=
 {
 	0,0
 };
+__device__ float maxL(float x, float y) {
+	return x>y?x:y;
+}
 
+__device__ float maxArray(float* arr, UINT length) {
+	float temp = arr[0];
+	for (int i = 1; i< length; i++) {
+		if (arr[i] > temp)
+			temp = arr[i];
+	}
+	return temp;
+}
+//////////////////////////////////////////////////////////////////////
+// LogMAP component decoder
+// index true decoder1 false decoder2
+//////////////////////////////////////////////////////////////////////
+__global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
+{
+
+    const char NextOut[2][NSTATE] = // check bit based on current and input bit
+    {	-1,-1,1,1,1,1,-1,-1,
+        1,1,-1,-1,-1,-1,1,1
+    };
+    // NextState[bk][current state]
+    const BYTE NextState[2][NSTATE] = // next state based on current and input bit
+    {	0,4,5,1,2,6,7,3,
+        4,0,1,5,6,2,3,7
+    };
+    // LastOut[bk][current state]
+    const char LastOut[2][NSTATE] =	// trellis last check bit
+    {	-1,1,1,-1,-1,1,1,-1,
+        1,-1,-1,1,1,-1,-1,1
+    };
+    // LastState[bk][current state]
+    const BYTE LastState[2][NSTATE] =	// last state lead to current state by input bk
+    {	0,3,4,7,1,2,5,6,
+        1,2,5,6,0,3,4,7
+    };
+
+    //const unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
+    const unsigned int block = 4*(blockIdx.x*BLOCK_NUM + blockIdx.y) + threadIdx.x;
+	//const unsigned int decoderIndex = unsigned int(block/BLOCK_NUM);
+    const unsigned int threadX = threadIdx.x;
+	//const unsigned int blockNum = (unsigned int)(threadInBlock/8);
+	const unsigned int threadY = threadIdx.y;
+
+
+	float gamma0, gamma1;
+
+	INT k;
+
+    if (block == BLOCK_NUM*4 - 1 && threadY != 0){	// alloc memory,
+	__shared__ float Alpha[L_BLOCK+3][4][8];
+	__shared__ float Beta[2][4][8];
+
+	__shared__ float tempSum0[4][8];
+	__shared__ float tempSum1[4][8];
+
+
+	// initialize Alpha & Beta
+	if ((block == 0 || block == BLOCK_NUM*4)&& threadY != 0) {
+			Alpha[0][threadX][threadY]=-INIFINITY;
+	}
+	else {
+			Alpha[0][threadX][threadY] = 0;
+	}
+
+	// forward recursion,compute Alpha 
+	for (k=1;k<L_BLOCK+3;k++)
+	{
+        gamma0=-msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[0][threadY]
+            -L_a[block*L_BLOCK + k-1]/2;
+            //-__logf(1+__expf(L_a[block*L_BLOCK + k-1]));
+        gamma1=msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[1][threadY]
+            +L_a[block*L_BLOCK + k-1]/2;
+
+		Alpha[k][threadX][threadY] = 
+			maxL(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
+				gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
+	}
+
+	// backward recursion,compute Beta
+    if (block == BLOCK_NUM*4 - 1 && threadY != 0){
+        Beta[1][threadX][threadY] = -INIFINITY;
+        
+    }
+    else
+        Beta[1][threadX][threadY] = 0;
+
+    if (block == BLOCK_NUM*4 - 1 ){
+        gamma0 = -msg[block*L_BLOCK + L_BLOCK+2]+parity[block*L_BLOCK + L_BLOCK+2]*LastOut[0][threadY] - 
+            L_a[block*L_BLOCK + L_BLOCK+2]/2;
+        gamma1 = msg[block*L_BLOCK + L_BLOCK+2]+parity[block*L_BLOCK + L_BLOCK+2]*LastOut[1][threadY] + 
+            L_a[block*L_BLOCK + L_BLOCK+2]/2;
+        tempSum0[threadX][threadY] = gamma0+Alpha[L_BLOCK+2][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+        tempSum1[threadX][threadY] = gamma1+Alpha[L_BLOCK+2][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+        __syncthreads();
+
+        if (threadY == 0) {
+            //L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
+            L_all[block*L_BLOCK + L_BLOCK+2]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+        }
+	for (k=L_BLOCK+1;k>=L_BLOCK-1;k--){
+             gamma0 =-msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[0][threadY]
+			-L_a[block*L_BLOCK + k]/2;	// bit0 
+		gamma1 =msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[1][threadY]
+			+L_a[block*L_BLOCK + k]/2;	// bit1 
+
+		Beta[0][threadX][threadY] = 
+			maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
+		__syncthreads();
+
+		Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
+
+        tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+        tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+
+        __syncthreads();
+
+        if (threadY == 0) {
+            //L_all[block*L_BLOCK + k]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
+            L_all[block*L_BLOCK + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+        }
+        }
+
+
+
+    
+    } else{
+        gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][threadY] - 
+            L_a[block*L_BLOCK + L_BLOCK-1]/2;
+        gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][threadY] + 
+            L_a[block*L_BLOCK + L_BLOCK-1]/2;
+        tempSum0[threadX][threadY] = gamma0+Alpha[L_BLOCK-1][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+        tempSum1[threadX][threadY] = gamma1+Alpha[L_BLOCK-1][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+        __syncthreads();
+
+        if (threadY == 0) {
+            //L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
+            L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+        }
+    }
+
+	for (k=L_BLOCK-2;k>=0;k--)
+	{
+		gamma0 =-msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[0][threadY]
+			-L_a[block*L_BLOCK + k]/2;	// bit0 
+		gamma1 =msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[1][threadY]
+			+L_a[block*L_BLOCK + k]/2;	// bit1 
+
+		Beta[0][threadX][threadY] = 
+			maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
+		__syncthreads();
+
+		Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
+
+        tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+        tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+
+        __syncthreads();
+
+        if (threadY == 0) {
+            //L_all[block*L_BLOCK + k]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
+            L_all[block*L_BLOCK + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+        }
+	}
+	}
+}
+
+//__global__ void interLeave(float * src, float * des){
+//    const int tid = blockIdx.x*blockDim.x + threadIdx.x;
+//    des[tid] = src[(((263 + tid*480)%6144)*tid)%6144];
+//    des[(((263 + tid*480)%6144)*tid)%6144 + 6144] = src[tid+6144];
+//}
+
+__global__ void deInterLeave(float * src, float * des){
+    const int tid = blockIdx.x*blockDim.x + threadIdx.x;
+    //des[interLeaveTable[tid]] = src[tid];
+    des[(((263 + tid*480)%6144)*tid)%6144] = src[tid];
+    des[tid + 6144+3] = src[(((263 + tid*480)%6144)*tid)%6144 + 6144 +3];
+if (tid == 0){
+for (int i = 0; i < M; i++){
+    des[6144+i] = 0;
+    des[6144+3+6144+i] = 0;
+    }
+}
+}
+
+__global__ void extrinsicInformation(float * L_all, float * msg, float * L_a, float * L_e) {
+    unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
+    L_e[tid] = L_all[tid + 6144+3] - 2*msg[tid + 6144+3] - L_a[tid + 6144+3];
+    L_e[tid + 6144+3] = L_all[tid] - 2*msg[tid] - L_a[tid];
+    if (tid == 0){
+	for (int i = 0; i < 3; i++){
+		L_e[6144+i] = L_all[6144+3+6144+i] - 2*msg[6144+3+6144+i] - L_a[6144+3+6144+i];
+    		L_e[6144 + 6144+3+i] = L_all[6144+i] - 2*msg[6144+i] - L_a[6144+i];
+	}
+    }
+}
+
+__global__ void demultiplex(float * stream, float * msg, float * parity) {
+    unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
+    //if (puncture){// punctured rate=1/2
+    //    msg[tid]=stream[2*tid];
+    //    parity[tid%2][tid]=stream[tid*2+1];
+    //}
+    //else {// unpunctured rate=1/3
+    //    msg[tid]=stream[3*tid];
+    //    parity0[tid]=stream[3*tid+1];
+    //    parity1[tid]=stream[3*tid+2];
+    //}
+        msg[tid]=stream[3*tid];
+		msg[6144 + 3 + tid] = stream[3*((((263 + tid*480)%6144)*tid)%6144)];
+        parity[tid]=stream[3*tid+1];
+        parity[6144+3+tid]=stream[3*tid+2];
+if (tid == 0){
+    for (int i = 0; i<M; i++){
+        msg[6144+i] = stream[3*6144+2*i];
+        parity[6144+i] = stream[3*6144+2*i+1];
+msg[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i];
+parity[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i+1];
+}
+}
+}
+
+__global__ void initializeExtrinsicInformation(float * L_e) {
+    unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
+    L_e[tid] = 0;
+	L_e[6144+3+tid] = 0;
+if (tid == 0){
+    for (int i = 0; i < M; i++){
+        L_e[6144+i] = 0;
+        L_e[6144+3+6144+i] = 0;
+}
+}
+    
+}
+
+__global__ void exestimateInformationBits(float * L_all, int * msghat) {
+    unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
+    if(L_all[tid + 6144+3]>0)
+        //msghat[m_Inter_table[tid]]=1;
+		msghat[(((263 + tid*480)%6144)*tid)%6144] = 1;
+    else
+        //msghat[m_Inter_table[tid]]=0;
+		msghat[(((263 + tid*480)%6144)*tid)%6144] = 0;
+}
+
+void countErrors(int *m, int * mhat, UINT * bitsError, UINT * frameError, UINT iter) {
+
+	bool f_err = false;
+	for (int i=0; i<(L_TOTAL-M);i++) {
+		if (m[i] != mhat[i]) {
+			bitsError[iter] = bitsError[iter]+1;
+			f_err = true;
+		}
+	}
+
+	if (f_err) 
+		frameError[iter] = frameError[iter]+1;
+}
 int main(int argc, char* argv[])
 {
 	MODULATION = 1;			//调制阶数：1,2,3,4,6
@@ -135,14 +397,17 @@ int main(int argc, char* argv[])
 	f2 =480; 					//与码长有关的交织器参数
 
 	double EbN0start = 0;//0;		//仿真起始信噪比
-	double EbN0end = 2;//4;		//最大仿真终止信噪比
-	double EbN0step =0.2;		//仿真信噪比步长
+	double EbN0end = 1;//4;		//最大仿真终止信噪比
+	double EbN0step =0.1;		//仿真信噪比步长
 	int FrameNum=100;	
 		
 	double rate = (double)source_length/(double)(SYMBOL_NUM);
 
 
 	int *source = NULL;
+	int *mhat = NULL;
+UINT bits_all,bits_err[MAXITER],frame_err[MAXITER];
+	float Ber,Fer;
 
 	int *coded_source = NULL;
 
@@ -153,11 +418,12 @@ int main(int argc, char* argv[])
 	int *flow_decoded = NULL;
 
 	double EbN0dB,sigma;
-	int nf, i1,snr_num,result_num=0;
-	double *err_bit_rate,*err_block_rate;
+	int nf, i1=0;
+	//int nf, i1,snr_num,result_num=0;
+	//double *err_bit_rate,*err_block_rate;
 
-	int temp[8],err_bit_num[8], err_block_num[8];
-	int i2;
+	//int temp[8],err_bit_num[8], err_block_num[8];
+	//int i2;
 
 	FILE *fp;   
 
@@ -191,6 +457,7 @@ int main(int argc, char* argv[])
 	  printf("\n fail to allocate memory of source \n");
 	  exit(1);  
 	}
+	mhat=(int *)malloc(source_length*sizeof(int));
 	if ((coded_source=(int *)malloc((3*source_length+4*M_num_reg)*sizeof(int)))==NULL)
 	{
 	  printf("\n fail to allocate memory of coded_source \n");
@@ -228,17 +495,17 @@ int main(int argc, char* argv[])
 	  printf("\n fail to allocate memory of flow_decoded\n");
 	  exit(1);  
 	}
-	snr_num=(int)((EbN0end-EbN0start)/EbN0step+1);
-	if ((err_bit_rate=(double*)malloc(N_ITERATION*snr_num*sizeof(double)))==NULL)
-	{
-		printf("\n fail to allocate memory of err_bit_rate \n");
-		exit(1);
-	}
-	if ((err_block_rate=(double*)malloc(N_ITERATION*snr_num*sizeof(double)))==NULL)
-	{
-		printf("\n fail to allocate memory of err_block_rate \n");
-		exit(1);
-	}
+	//snr_num=(int)((EbN0end-EbN0start)/EbN0step+1);
+	//if ((err_bit_rate=(double*)malloc(N_ITERATION*snr_num*sizeof(double)))==NULL)
+	//{
+//		printf("\n fail to allocate memory of err_bit_rate \n");
+//		exit(1);
+//	}
+//	if ((err_block_rate=(double*)malloc(N_ITERATION*snr_num*sizeof(double)))==NULL)
+//	{
+//		printf("\n fail to allocate memory of err_block_rate \n");
+//		exit(1);
+//	}
 	
 	srand((unsigned)time(NULL));
 
@@ -246,7 +513,7 @@ findCudaDevice(argc, (const char **)argv);
 
 	float * yDevice;
 	float * msgDevice;
-	BYTE * mhatDevice;
+	int * mhatDevice;
 	float * parityDevice;
 	float * L_eDevice;
 	float * L_aDevice;
@@ -254,7 +521,7 @@ findCudaDevice(argc, (const char **)argv);
 
     cudaMalloc((void **)&yDevice, L_ALL*sizeof(float));
     cudaMalloc((void **)&msgDevice, L_TOTAL_NUM*2*sizeof(float));
-    cudaMalloc((void **)&mhatDevice, L_TOTAL*sizeof(BYTE));
+    cudaMalloc((void **)&mhatDevice, L_TOTAL*sizeof(int));
     cudaMalloc((void **)&parityDevice, L_TOTAL_NUM*2*sizeof(float));
     cudaMalloc((void **)&L_eDevice, L_TOTAL_NUM*2*sizeof(float));
     cudaMalloc((void **)&L_aDevice, L_TOTAL_NUM*2*sizeof(float));
@@ -264,12 +531,17 @@ findCudaDevice(argc, (const char **)argv);
 	{
 		sigma = pow(10,-EbN0dB/20)*sqrt(0.5/(rate*MODULATION));
 		//sigma = pow(10,-EbN0dB/20)*sqrt(0.5);
-		for (i2=0;i2<N_ITERATION;i2++)
-		{
-			temp[i2]=0;err_bit_num[i2]=0; err_block_num[i2]=0;
+		//for (i2=0;i2<N_ITERATION;i2++)
+		//{
+	//		temp[i2]=0;err_bit_num[i2]=0; err_block_num[i2]=0;
+	//	}
+		for (int i =0; i<MAXITER;i++) {
+			bits_err[i]=0;
+			frame_err[i]=0;
 		}
+		bits_all = 0;
 
-		for (nf=0; nf<FrameNum; nf++)
+		for (nf=0; nf<FrameNum; nf++,bits_all += L_TOTAL)
 		{
 			for(i1=0; i1<source_length; i1+=1)
 			{
@@ -313,29 +585,52 @@ findCudaDevice(argc, (const char **)argv);
 
 				exestimateInformationBits<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, mhatDevice); 
 
-				//cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
-				//countErrors(m, mhat, bits_err, frame_err, iter);
+				cudaMemcpy(mhat, mhatDevice, sizeof(int)*L_TOTAL, cudaMemcpyDeviceToHost);
+				countErrors(source, mhat, bits_err, frame_err, iter);
 
 			}
+		}
+	printf("-------------------------\n");
+		printf("Eb/No=%fdB:\n",EbN0dB);
+		printf("-------------------------\n");
 
-			TurboDecoding(flow_for_decode, flow_decoded, 3*source_length+4*M_num_reg);
+		for (int i=0;i<MAXITER;i++) {
+			Ber=(float)bits_err[i]/(float)bits_all;
+			Fer=(float)frame_err[i]/(float)FRAME_NUM;
+			printf("Iteration:%d\n",i+1);
+			printf("---Ber=%f\n---Fer=%f\n",Ber,Fer);
+		}
+	}
+	
+
+		//long double durationSum = 0.0;
+		//for (i = 0; i < FRAME_NUM; i++) {
+		//	durationSum += duration[i];
+		//}
+		//durationSum /= CLOCKS_PER_SEC;
+
+		//long double throughput = FRAME_NUM*6144 / durationSum / 1000000;
+		//cout<<"throughput: "<<throughput<<"Mbps"<<endl
+
+			//TurboDecoding(flow_for_decode, flow_decoded, 3*source_length+4*M_num_reg);
 				
 
-			for(i2=0;i2<N_ITERATION;i2++)
-			{
-					temp[i2] = err_bit_num[i2];
-				
-					for (i1=0; i1<source_length; i1++)
-					{
-						if (*(source+i1) != *(flow_decoded+i2*source_length+i1))
-						{
-							err_bit_num[i2] = err_bit_num[i2]+1;
-						}
-					}
-					if(temp[i2]!=err_bit_num[i2])
-						err_block_num[i2]++;
-			}
-				
+			//for(i2=0;i2<N_ITERATION;i2++)
+			//{
+			//		temp[i2] = err_bit_num[i2];
+			//	
+			//		for (i1=0; i1<source_length; i1++)
+			//		{
+			//			if (*(source+i1) != *(flow_decoded+i2*source_length+i1))
+			//			{
+			//				err_bit_num[i2] = err_bit_num[i2]+1;
+			//			}
+			//		}
+			//		if(temp[i2]!=err_bit_num[i2])
+			//			err_block_num[i2]++;
+			//}
+		
+/*		
 			if(err_block_num[N_ITERATION-1]>=50)//错够1000个块，跳出
 			{
 				nf++;
@@ -348,7 +643,7 @@ findCudaDevice(argc, (const char **)argv);
 			err_bit_rate[result_num*N_ITERATION+i2] = (double)err_bit_num[i2]/(nf*source_length);
 			err_block_rate[result_num*N_ITERATION+i2] = (double)err_block_num[i2]/(double)(nf);
 		
-/*-----------------------------------------------------------------*/
+
 			printf("block error rate: ");
 			printf("%.10f ",err_block_rate[result_num*N_ITERATION+i2]);
 			printf("bit error rate: ");
@@ -413,6 +708,7 @@ findCudaDevice(argc, (const char **)argv);
 
 
 fprintf(fp,"----------------------------------------------------------");
+*/
 
 	fclose(fp);
 /*-----------------------------------------------------------------*/	
@@ -592,6 +888,7 @@ int gen_g_matrix(int k_column, int g_row1, int g_row2, int *mx_g_turbo)
 	输出参数:
 		bin_stat - 二进制序列首址.
 返回值:
+
 	无
 ---------------------------------------------------------------*/
 void int2bin(int intstat, int *bin_stat, int length)
@@ -1875,221 +2172,4 @@ void demodule(double *symbol_i, double *symbol_q, int symbol_len,float* out,doub
 	}
 }
 
-__device__ float maxL(float x, float y) {
-	return x>y?x:y;
-}
 
-__device__ float maxArray(float* arr, UINT length) {
-	float temp = arr[0];
-	for (int i = 1; i< length; i++) {
-		if (arr[i] > temp)
-			temp = arr[i];
-	}
-	return temp;
-}
-//////////////////////////////////////////////////////////////////////
-// LogMAP component decoder
-// index true decoder1 false decoder2
-//////////////////////////////////////////////////////////////////////
-__global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
-{
-
-    const char NextOut[2][NSTATE] = // check bit based on current and input bit
-    {	-1,-1,1,1,1,1,-1,-1,
-        1,1,-1,-1,-1,-1,1,1
-    };
-    // NextState[bk][current state]
-    const BYTE NextState[2][NSTATE] = // next state based on current and input bit
-    {	0,4,5,1,2,6,7,3,
-        4,0,1,5,6,2,3,7
-    };
-    // LastOut[bk][current state]
-    const char LastOut[2][NSTATE] =	// trellis last check bit
-    {	-1,1,1,-1,-1,1,1,-1,
-        1,-1,-1,1,1,-1,-1,1
-    };
-    // LastState[bk][current state]
-    const BYTE LastState[2][NSTATE] =	// last state lead to current state by input bk
-    {	0,3,4,7,1,2,5,6,
-        1,2,5,6,0,3,4,7
-    };
-
-    //const unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    const unsigned int block = 4*(blockIdx.x*BLOCK_NUM + blockIdx.y) + threadIdx.x;
-	//const unsigned int decoderIndex = unsigned int(block/BLOCK_NUM);
-    const unsigned int threadX = threadIdx.x;
-	//const unsigned int blockNum = (unsigned int)(threadInBlock/8);
-	const unsigned int threadY = threadIdx.y;
-
-
-	float gamma0, gamma1;
-
-	INT k;
-
-	// alloc memory,
-	__shared__ float Alpha[L_BLOCK][4][8];
-	__shared__ float Beta[2][4][8];
-
-	__shared__ float tempSum0[4][8];
-	__shared__ float tempSum1[4][8];
-
-
-	// initialize Alpha & Beta
-	if ((block == 0 || block == BLOCK_NUM*4)&& threadY != 0) {
-			Alpha[0][threadX][threadY]=-INIFINITY;
-	}
-	else {
-			Alpha[0][threadX][threadY] = 0;
-	}
-
-	// forward recursion,compute Alpha 
-	for (k=1;k<L_BLOCK;k++)
-	{
-        gamma0=-msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[0][threadY]
-            -L_a[block*L_BLOCK + k-1]/2;
-            //-__logf(1+__expf(L_a[block*L_BLOCK + k-1]));
-        gamma1=msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[1][threadY]
-            +L_a[block*L_BLOCK + k-1]/2;
-
-		Alpha[k][threadX][threadY] = 
-			maxL(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
-				gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
-	}
-
-	// backward recursion,compute Beta
-    if (block == BLOCK_NUM*4 - 1 && threadY != 0)
-        Beta[1][threadX][threadY] = -INIFINITY;
-    else
-        Beta[1][threadX][threadY] = 0;
-
-        gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][threadY] - 
-            L_a[block*L_BLOCK + L_BLOCK-1]/2;
-        gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][threadY] + 
-            L_a[block*L_BLOCK + L_BLOCK-1]/2;
-        tempSum0[threadX][threadY] = gamma0+Alpha[L_BLOCK-1][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
-        tempSum1[threadX][threadY] = gamma1+Alpha[L_BLOCK-1][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
-        __syncthreads();
-
-        if (threadY == 0) {
-            //L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
-            L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
-        }
-
-	for (k=L_BLOCK-2;k>=0;k--)
-	{
-		gamma0 =-msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[0][threadY]
-			-L_a[block*L_BLOCK + k+1]/2;	// bit0 
-		gamma1 =msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[1][threadY]
-			+L_a[block*L_BLOCK + k+1]/2;	// bit1 
-
-		Beta[0][threadX][threadY] = 
-			maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
-				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
-		__syncthreads();
-
-		Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
-
-        gamma0 = -msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[0][threadY] - 
-            L_a[block*L_BLOCK + k]/2;
-        gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][threadY] + 
-            L_a[block*L_BLOCK + k]/2;
-
-        tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
-        tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
-
-        __syncthreads();
-
-        if (threadY == 0) {
-            //L_all[block*L_BLOCK + k]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
-            L_all[block*L_BLOCK + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
-        }
-	}
-}
-
-
-__global__ void interLeave(float * src, float * des){
-    const int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    des[tid] = src[(((263 + tid*480)%6144)*tid)%6144];
-    des[(((263 + tid*480)%6144)*tid)%6144 + 6144] = src[tid+6144];
-}
-
-__global__ void deInterLeave(float * src, float * des){
-    const int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    //des[interLeaveTable[tid]] = src[tid];
-    des[(((263 + tid*480)%6144)*tid)%6144] = src[tid];
-    des[tid + 6144+3] = src[(((263 + tid*480)%6144)*tid)%6144 + 6144 +3];
-if (tid == 0){
-for (int i = 0; i < M; i++){
-    des[6144+i] = 0;
-    des[6144+3+6144+i] = 0;
-    }
-}
-}
-
-__global__ void extrinsicInformation(float * L_all, float * msg, float * L_a, float * L_e) {
-    unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    L_e[tid] = L_all[tid + 6144] - 2*msg[tid + 6144] - L_a[tid + 6144];
-    L_e[tid + 6144] = L_all[tid] - 2*msg[tid] - L_a[tid];
-}
-
-__global__ void demultiplex(float * stream, float * msg, float * parity) {
-    unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    //if (puncture){// punctured rate=1/2
-    //    msg[tid]=stream[2*tid];
-    //    parity[tid%2][tid]=stream[tid*2+1];
-    //}
-    //else {// unpunctured rate=1/3
-    //    msg[tid]=stream[3*tid];
-    //    parity0[tid]=stream[3*tid+1];
-    //    parity1[tid]=stream[3*tid+2];
-    //}
-        msg[tid]=stream[3*tid];
-		msg[6144 + 3 + tid] = stream[3*((((263 + tid*480)%6144)*tid)%6144)];
-        parity[tid]=stream[3*tid+1];
-        parity[6144+3+tid]=stream[3*tid+2];
-if (tid == 0){
-    for (int i = 0; i<M; i++){
-        msg[6144+i] = stream[3*6144+2*i];
-        parity[6144+i] = stream[3*6144+2*i+1];
-msg[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i];
-parity[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i+1];
-}
-}
-}
-
-__global__ void initializeExtrinsicInformation(float * L_e) {
-    unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    L_e[tid] = 0;
-	L_e[6144+3+tid] = 0;
-if (tid == 0){
-    for (int i = 0; i < M; i++){
-        L_e[6144+i] = 0;
-        L_e[6144+3+6144+i] = 0;
-}
-}
-    
-}
-
-__global__ void exestimateInformationBits(float * L_all, BYTE * msghat) {
-    unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    if(L_all[tid + 6144]>0)
-        //msghat[m_Inter_table[tid]]=1;
-		msghat[(((263 + tid*480)%6144)*tid)%6144] = 1;
-    else
-        //msghat[m_Inter_table[tid]]=0;
-		msghat[(((263 + tid*480)%6144)*tid)%6144] = 0;
-}
-
-void countErrors(BYTE *m, BYTE * mhat, UINT * bitsError, UINT * frameError, UINT iter) {
-
-	bool f_err = false;
-	for (int i=0; i<(L_TOTAL-M);i++) {
-		if (m[i] != mhat[i]) {
-			bitsError[iter] = bitsError[iter]+1;
-			f_err = true;
-		}
-	}
-
-	if (f_err) 
-		frameError[iter] = frameError[iter]+1;
-}
