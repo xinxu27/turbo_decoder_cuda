@@ -12,11 +12,11 @@ using namespace std;
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
 #define L_TOTAL_NUM  (L_TOTAL+M)
 #define MAXITER 6
-#define	FRAME_NUM 10000
-#define AlphaBetaBLOCK_NUM 8
-#define AlphaBetaTHREAD_NUM 8
+#define	FRAME_NUM 100
+//#define AlphaBetaBLOCK_NUM 8
+//#define AlphaBetaTHREAD_NUM 8
 
-#define THREAD_NUM 8
+//#define THREAD_NUM 8
 #define BLOCK_NUM 64
 #define L_BLOCK L_TOTAL/BLOCK_NUM/4
 dim3 gridSize(2, BLOCK_NUM);
@@ -399,14 +399,12 @@ int main(int argc, char* argv[])
 	double EbN0start = 0;//0;		//仿真起始信噪比
 	double EbN0end = 1;//4;		//最大仿真终止信噪比
 	double EbN0step =0.1;		//仿真信噪比步长
-	int FrameNum=100;	
 		
 	double rate = (double)source_length/(double)(SYMBOL_NUM);
 
-
 	int *source = NULL;
 	int *mhat = NULL;
-UINT bits_all,bits_err[MAXITER],frame_err[MAXITER];
+	UINT bits_all,bits_err[MAXITER],frame_err[MAXITER];
 	float Ber,Fer;
 
 	int *coded_source = NULL;
@@ -419,36 +417,6 @@ UINT bits_all,bits_err[MAXITER],frame_err[MAXITER];
 
 	double EbN0dB,sigma;
 	int nf, i1=0;
-	//int nf, i1,snr_num,result_num=0;
-	//double *err_bit_rate,*err_block_rate;
-
-	//int temp[8],err_bit_num[8], err_block_num[8];
-	//int i2;
-
-	FILE *fp;   
-
-	
-	if ((fp=fopen("result.txt","a+"))==NULL)
-	{
-		printf("cannot open file\n");
-	    return 0;
-	}
-
-	fprintf(fp,"\n%s","MODULATION = ");
-	fprintf(fp,"%d", MODULATION);
-
-	fprintf(fp,"\n%s","source_length = ");
-	fprintf(fp,"%d", source_length);
-	
-	fprintf(fp,"\n%s","rate_coding = ");
-	fprintf(fp,"%f",  rate);
-	
-
-	fprintf(fp,"\n%s", "SNR_begin=");
-	fprintf(fp, "%f", EbN0start);
-
-	fprintf(fp,"\n%s", "SNR_step=");
-	fprintf(fp,"%f", EbN0step);
 
 	TurboCodingInit();
 			
@@ -495,21 +463,10 @@ UINT bits_all,bits_err[MAXITER],frame_err[MAXITER];
 	  printf("\n fail to allocate memory of flow_decoded\n");
 	  exit(1);  
 	}
-	//snr_num=(int)((EbN0end-EbN0start)/EbN0step+1);
-	//if ((err_bit_rate=(double*)malloc(N_ITERATION*snr_num*sizeof(double)))==NULL)
-	//{
-//		printf("\n fail to allocate memory of err_bit_rate \n");
-//		exit(1);
-//	}
-//	if ((err_block_rate=(double*)malloc(N_ITERATION*snr_num*sizeof(double)))==NULL)
-//	{
-//		printf("\n fail to allocate memory of err_block_rate \n");
-//		exit(1);
-//	}
 	
 	srand((unsigned)time(NULL));
 
-findCudaDevice(argc, (const char **)argv);
+	findCudaDevice(argc, (const char **)argv);
 
 	float * yDevice;
 	float * msgDevice;
@@ -530,38 +487,29 @@ findCudaDevice(argc, (const char **)argv);
 	for (EbN0dB=EbN0start; EbN0dB<=EbN0end; EbN0dB+=EbN0step)
 	{
 		sigma = pow(10,-EbN0dB/20)*sqrt(0.5/(rate*MODULATION));
-		//sigma = pow(10,-EbN0dB/20)*sqrt(0.5);
-		//for (i2=0;i2<N_ITERATION;i2++)
-		//{
-	//		temp[i2]=0;err_bit_num[i2]=0; err_block_num[i2]=0;
-	//	}
+
 		for (int i =0; i<MAXITER;i++) {
 			bits_err[i]=0;
 			frame_err[i]=0;
 		}
 		bits_all = 0;
 
-		for (nf=0; nf<FrameNum; nf++,bits_all += L_TOTAL)
+		for (nf=0; nf<FRAME_NUM; nf++,bits_all += L_TOTAL)
 		{
 			for(i1=0; i1<source_length; i1+=1)
 			{
 				*(source+i1)=rand()%2;
 			}
 
-
-
-
             TurboEnCoding(source, coded_source, source_length);
 
 /*******************************************************************************/
-
 			module(coded_source,modulated_source_i,modulated_source_q,SYMBOL_NUM*MODULATION,MODULATION);
 
 			AWGN(modulated_source_i, after_channel_i, sigma, SYMBOL_NUM);
 			AWGN(modulated_source_q, after_channel_q, sigma, SYMBOL_NUM);
 
 			demodule(after_channel_i, after_channel_q, SYMBOL_NUM,flow_for_decode,1/(2*pow(sigma,2)),MODULATION);
-
 /*******************************************************************************/
 
 			cudaMemcpy(yDevice,flow_for_decode,sizeof(float)*length_after_code, cudaMemcpyHostToDevice);
@@ -590,7 +538,7 @@ findCudaDevice(argc, (const char **)argv);
 
 			}
 		}
-	printf("-------------------------\n");
+		printf("-------------------------\n");
 		printf("Eb/No=%fdB:\n",EbN0dB);
 		printf("-------------------------\n");
 
@@ -602,115 +550,6 @@ findCudaDevice(argc, (const char **)argv);
 		}
 	}
 	
-
-		//long double durationSum = 0.0;
-		//for (i = 0; i < FRAME_NUM; i++) {
-		//	durationSum += duration[i];
-		//}
-		//durationSum /= CLOCKS_PER_SEC;
-
-		//long double throughput = FRAME_NUM*6144 / durationSum / 1000000;
-		//cout<<"throughput: "<<throughput<<"Mbps"<<endl
-
-			//TurboDecoding(flow_for_decode, flow_decoded, 3*source_length+4*M_num_reg);
-				
-
-			//for(i2=0;i2<N_ITERATION;i2++)
-			//{
-			//		temp[i2] = err_bit_num[i2];
-			//	
-			//		for (i1=0; i1<source_length; i1++)
-			//		{
-			//			if (*(source+i1) != *(flow_decoded+i2*source_length+i1))
-			//			{
-			//				err_bit_num[i2] = err_bit_num[i2]+1;
-			//			}
-			//		}
-			//		if(temp[i2]!=err_bit_num[i2])
-			//			err_block_num[i2]++;
-			//}
-		
-/*		
-			if(err_block_num[N_ITERATION-1]>=50)//错够1000个块，跳出
-			{
-				nf++;
-				break;
-			}
-		}//FrameNum
-
-		for(i2=0;i2<N_ITERATION;i2++)		
-		{
-			err_bit_rate[result_num*N_ITERATION+i2] = (double)err_bit_num[i2]/(nf*source_length);
-			err_block_rate[result_num*N_ITERATION+i2] = (double)err_block_num[i2]/(double)(nf);
-		
-
-			printf("block error rate: ");
-			printf("%.10f ",err_block_rate[result_num*N_ITERATION+i2]);
-			printf("bit error rate: ");
-			printf("%.10f ",err_bit_rate[result_num*N_ITERATION+i2]);
-			printf("\n");
-		
-		}
-	//	if (err_block_rate[result_num]<=0.01)
-	//	{
-	//		result_num++;
-	//		break;//误块率小于0.01，跳出
-	//	}
-		printf("\n");
-		result_num++;
-
-	}//Eb/No
-
-    fprintf(fp,"%s ","N_ITERATION=1");
-	if (EbN0dB>EbN0end)
-	{
-		fprintf(fp,"\n%s", "SNR_end=");
-		fprintf(fp,"%f", EbN0end);
-	}
-	else
-	{
-		fprintf(fp,"\n%s", "SNR_end=");
-		fprintf(fp,"%f", EbN0dB);
-	}
-	double factor;
-	factor=10*log(rate*MODULATION)/log(10);
-	fprintf(fp,"\n%s\n", "Es/N0:");
-	for (i1=0;i1<result_num;i1++)
-	{
-		fprintf(fp,"%f ",(EbN0start+EbN0step*i1)+factor);
-	}
-
-	fprintf(fp,"\n%s\n", "Ber:");
-	
-	for(i2=0;i2<N_ITERATION;i2++)
-	{
-		for(i1=0;i1<result_num;i1++)
-		{
-			fprintf(fp," %.10f ",err_bit_rate[i1*N_ITERATION+i2]);
-		}
-		fprintf(fp,"\n");
-	}
-	fprintf(fp,"\n%s\n", "Bler:");
-	for(i2=0;i2<N_ITERATION;i2++)
-	{
-		for(i1=0;i1<result_num;i1++)
-		{
-			fprintf(fp,"%.10f ",err_block_rate[i1*N_ITERATION+i2]);
-		}
-		fprintf(fp,"\n");
-		
-	}
-	fprintf(fp,"\n%s\n", "throughput:");
-	for (i1=0;i1<result_num;i1++)
-	{
-		fprintf(fp,"%.10f ",(1-err_block_rate[i1])*rate*MODULATION);
-	}
-
-
-fprintf(fp,"----------------------------------------------------------");
-*/
-
-	fclose(fp);
 /*-----------------------------------------------------------------*/	
 /*-----------------------------------------------------------------*/	
 	TurboCodingRelease();
