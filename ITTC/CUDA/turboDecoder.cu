@@ -256,9 +256,9 @@ findCudaDevice(argc, (const char **)argv);
     cudaMalloc((void **)&msgDevice, L_TOTAL_NUM*2*sizeof(float));
     cudaMalloc((void **)&mhatDevice, L_TOTAL*sizeof(BYTE));
     cudaMalloc((void **)&parityDevice, L_TOTAL_NUM*2*sizeof(float));
-    cudaMalloc((void **)&L_eDevice, L_TOTAL*2*sizeof(float));
-    cudaMalloc((void **)&L_aDevice, L_TOTAL*2*sizeof(float));
-    cudaMalloc((void **)&L_allDevice, L_TOTAL*2*sizeof(float));
+    cudaMalloc((void **)&L_eDevice, L_TOTAL_NUM*2*sizeof(float));
+    cudaMalloc((void **)&L_aDevice, L_TOTAL_NUM*2*sizeof(float));
+    cudaMalloc((void **)&L_allDevice, L_TOTAL_NUM*2*sizeof(float));
 
 	for (EbN0dB=EbN0start; EbN0dB<=EbN0end; EbN0dB+=EbN0step)
 	{
@@ -295,6 +295,28 @@ findCudaDevice(argc, (const char **)argv);
 			cudaMemcpy(yDevice,flow_for_decode,sizeof(float)*length_after_code, cudaMemcpyHostToDevice);
 
 			demultiplex<<<LEAVER_BLOCK,LEAVER_THREAD>>>(yDevice, msgDevice, parityDevice); 
+			initializeExtrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice);
+
+			for (int iter = 0; iter<MAXITER; iter++) {
+				
+				deInterLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
+
+                logmap<<<gridSize, blockSize>>>(msgDevice, parityDevice, L_aDevice, L_allDevice);
+
+				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
+
+				//interLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
+
+                //logmap<<<BLOCK_NUM, THREAD_NUM>>>(imsgDevice, parity1Device, L_aDevice, L_allDevice, false);
+
+				//extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, imsgDevice, L_aDevice, L_eDevice);
+
+				exestimateInformationBits<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, mhatDevice); 
+
+				//cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
+				//countErrors(m, mhat, bits_err, frame_err, iter);
+
+			}
 
 			TurboDecoding(flow_for_decode, flow_decoded, 3*source_length+4*M_num_reg);
 				
@@ -1673,7 +1695,7 @@ void dectobin(double *flow_for_change, int *flow_changed, int flow_len, int inte
 		else if (*(flow_changed)>(pow(2,total_len)-1))
 		{
 			*(flow_changed+i)=(long)pow(2,total_len+i)-1;
-		}
+		}            //-__logf(1+__expf(L_a[block*L_BLOCK + k-1]));
 
 		/*if (*(flow_changed+i)>=0)
 		{
@@ -1924,9 +1946,10 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 	for (k=1;k<L_BLOCK;k++)
 	{
         gamma0=-msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[0][threadY]
-            -__logf(1+__expf(L_a[block*L_BLOCK + k-1]));
+            -L_a[block*L_BLOCK + k-1]/2;
+            //-__logf(1+__expf(L_a[block*L_BLOCK + k-1]));
         gamma1=msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[1][threadY]
-            +L_a[block*L_BLOCK + k-1]-__logf(1+__expf(L_a[block*L_BLOCK + k-1]));
+            +L_a[block*L_BLOCK + k-1]/2;
 
 		Alpha[k][threadX][threadY] = 
 			maxL(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
@@ -1940,9 +1963,9 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
         Beta[1][threadX][threadY] = 0;
 
         gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][threadY] - 
-            __logf(1+__expf(L_a[block*L_BLOCK + L_BLOCK-1]));
+            L_a[block*L_BLOCK + L_BLOCK-1]/2;
         gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][threadY] + 
-            L_a[block*L_BLOCK + L_BLOCK-1]-__logf(1+__expf(L_a[block*L_BLOCK + L_BLOCK-1]));
+            L_a[block*L_BLOCK + L_BLOCK-1]/2;
         tempSum0[threadX][threadY] = gamma0+Alpha[L_BLOCK-1][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
         tempSum1[threadX][threadY] = gamma1+Alpha[L_BLOCK-1][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
         __syncthreads();
@@ -1955,9 +1978,9 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 	for (k=L_BLOCK-2;k>=0;k--)
 	{
 		gamma0 =-msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[0][threadY]
-			-__logf(1+__expf(L_a[block*L_BLOCK + k+1]));	// bit0 
+			-L_a[block*L_BLOCK + k+1]/2;	// bit0 
 		gamma1 =msg[block*L_BLOCK + k+1]+parity[block*L_BLOCK + k+1]*NextOut[1][threadY]
-			+L_a[block*L_BLOCK + k+1]-__logf(1+__expf(L_a[block*L_BLOCK + k+1]));	// bit1 
+			+L_a[block*L_BLOCK + k+1]/2;	// bit1 
 
 		Beta[0][threadX][threadY] = 
 			maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
@@ -1967,9 +1990,9 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 		Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
 
         gamma0 = -msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[0][threadY] - 
-            __logf(1+__expf(L_a[block*L_BLOCK + k]));
+            L_a[block*L_BLOCK + k]/2;
         gamma1 = msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*LastOut[1][threadY] + 
-            L_a[block*L_BLOCK + k]-__logf(1+__expf(L_a[block*L_BLOCK + k]));
+            L_a[block*L_BLOCK + k]/2;
 
         tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
         tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
@@ -1994,7 +2017,13 @@ __global__ void deInterLeave(float * src, float * des){
     const int tid = blockIdx.x*blockDim.x + threadIdx.x;
     //des[interLeaveTable[tid]] = src[tid];
     des[(((263 + tid*480)%6144)*tid)%6144] = src[tid];
-    des[tid + 6144] = src[(((263 + tid*480)%6144)*tid)%6144 + 6144];
+    des[tid + 6144+3] = src[(((263 + tid*480)%6144)*tid)%6144 + 6144 +3];
+if (tid == 0){
+for (int i = 0; i < M; i++){
+    des[6144+i] = 0;
+    des[6144+3+6144+i] = 0;
+    }
+}
 }
 
 __global__ void extrinsicInformation(float * L_all, float * msg, float * L_a, float * L_e) {
@@ -2015,15 +2044,29 @@ __global__ void demultiplex(float * stream, float * msg, float * parity) {
     //    parity1[tid]=stream[3*tid+2];
     //}
         msg[tid]=stream[3*tid];
-		msg[6144 + tid] = stream[3*((((263 + tid*480)%6144)*tid)%6144)];
+		msg[6144 + 3 + tid] = stream[3*((((263 + tid*480)%6144)*tid)%6144)];
         parity[tid]=stream[3*tid+1];
-        parity[6144+tid]=stream[3*tid+2];
+        parity[6144+3+tid]=stream[3*tid+2];
+if (tid == 0){
+    for (int i = 0; i<M; i++){
+        msg[6144+i] = stream[3*6144+2*i];
+        parity[6144+i] = stream[3*6144+2*i+1];
+msg[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i];
+parity[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i+1];
+}
+}
 }
 
 __global__ void initializeExtrinsicInformation(float * L_e) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     L_e[tid] = 0;
-	L_e[6144+tid] = 0;
+	L_e[6144+3+tid] = 0;
+if (tid == 0){
+    for (int i = 0; i < M; i++){
+        L_e[6144+i] = 0;
+        L_e[6144+3+6144+i] = 0;
+}
+}
     
 }
 
