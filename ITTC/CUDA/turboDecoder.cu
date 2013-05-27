@@ -333,17 +333,17 @@ __global__ void demultiplex(float * stream, float * msg, float * parity) {
     //    parity0[tid]=stream[3*tid+1];
     //    parity1[tid]=stream[3*tid+2];
     //}
-        msg[tid]=stream[3*tid];
-		msg[6144 + 3 + tid] = stream[3*((((263 + tid*480)%6144)*tid)%6144)];
-        parity[tid]=stream[3*tid+1];
-        parity[6144+3+tid]=stream[3*tid+2];
+        msg[tid]=0.5*stream[3*tid];
+		msg[6144 + 3 + tid] = 0.5*stream[3*((((263 + tid*480)%6144)*tid)%6144)];
+        parity[tid]=0.5*stream[3*tid+1];
+        parity[6144+3+tid]=0.5*stream[3*tid+2];
 
 		if (tid == 0){
 		    for (int i = 0; i<M; i++){
-		        msg[6144+i] = stream[3*6144+2*i];
-		        parity[6144+i] = stream[3*6144+2*i+1];
-				msg[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i];
-				parity[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i+1];
+		        msg[6144+i] = 0.5*stream[3*6144+2*i];
+		        parity[6144+i] = 0.5*stream[3*6144+2*i+1];
+				msg[6144 + 3+6144 + i] = 0.5*stream[3*6144+2*3+2*i];
+				parity[6144 + 3+6144 + i] = 0.5*stream[3*6144+2*3+2*i+1];
 			}
 		}
 }
