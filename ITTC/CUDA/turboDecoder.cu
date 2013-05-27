@@ -10,15 +10,15 @@ using namespace std;
 
 #define M	3	// register length,=tail length
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
-#define L_TOTAL_NUM  (L_TOTAL+M)
-#define MAXITER 6
+#define L_TOTAL_NUM 6147 
+#define MAXITER 10
 #define	FRAME_NUM 100
 //#define AlphaBetaBLOCK_NUM 8
 //#define AlphaBetaTHREAD_NUM 8
 
 //#define THREAD_NUM 8
-#define BLOCK_NUM 64
-#define L_BLOCK L_TOTAL/BLOCK_NUM/4
+#define BLOCK_NUM 16
+#define L_BLOCK (L_TOTAL/BLOCK_NUM/4)
 dim3 gridSize(2, BLOCK_NUM);
 dim3 blockSize(4, 8);
 
@@ -35,8 +35,8 @@ dim3 blockSize(4, 8);
 														  2-MAX-LogMAP译码
 														  3-SOVA译码
                                                           4-const_LogMAP */
-#define N_ITERATION			8				/* 译码叠代次数 */
-#define MAX_FRAME_LENGTH	10000			/* 最大帧长 */
+//#define N_ITERATION			8				/* 译码叠代次数 */
+//#define MAX_FRAME_LENGTH	10000			/* 最大帧长 */
 /*==================================================*/
 /* 生成阵参数 */
 #define COLUMN_OF_G		4					/* 生成阵列数 */
@@ -122,6 +122,7 @@ double _bpsk_map_q[2]=
 {
 	0,0
 };
+
 __device__ float maxL(float x, float y) {
 	return x>y?x:y;
 }
@@ -173,7 +174,6 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 
 	INT k;
 
-    if (block == BLOCK_NUM*4 - 1 && threadY != 0){	// alloc memory,
 	__shared__ float Alpha[L_BLOCK+3][4][8];
 	__shared__ float Beta[2][4][8];
 
@@ -204,14 +204,13 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 	}
 
 	// backward recursion,compute Beta
-    if (block == BLOCK_NUM*4 - 1 && threadY != 0){
+    if ((block == BLOCK_NUM*4 - 1 || block == BLOCK_NUM*8 -1) && threadY != 0){
         Beta[1][threadX][threadY] = -INIFINITY;
-        
     }
     else
         Beta[1][threadX][threadY] = 0;
 
-    if (block == BLOCK_NUM*4 - 1 ){
+    if (block == BLOCK_NUM*4 - 1 || block == BLOCK_NUM*8 -1){
         gamma0 = -msg[block*L_BLOCK + L_BLOCK+2]+parity[block*L_BLOCK + L_BLOCK+2]*LastOut[0][threadY] - 
             L_a[block*L_BLOCK + L_BLOCK+2]/2;
         gamma1 = msg[block*L_BLOCK + L_BLOCK+2]+parity[block*L_BLOCK + L_BLOCK+2]*LastOut[1][threadY] + 
@@ -224,32 +223,30 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
             //L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
             L_all[block*L_BLOCK + L_BLOCK+2]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
         }
-	for (k=L_BLOCK+1;k>=L_BLOCK-1;k--){
-             gamma0 =-msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[0][threadY]
-			-L_a[block*L_BLOCK + k]/2;	// bit0 
-		gamma1 =msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[1][threadY]
-			+L_a[block*L_BLOCK + k]/2;	// bit1 
 
-		Beta[0][threadX][threadY] = 
-			maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
-				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
-		__syncthreads();
+		for (k=L_BLOCK+1;k>=L_BLOCK-1;k--){
+    	         gamma0 =-msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[0][threadY]
+				-L_a[block*L_BLOCK + k]/2;	// bit0 
+			gamma1 =msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[1][threadY]
+				+L_a[block*L_BLOCK + k]/2;	// bit1 
 
-		Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
+			Beta[0][threadX][threadY] = 
+				maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+					gamma1 + Beta[1][threadX][NextState[1][threadY]]);
+			__syncthreads();
 
-        tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
-        tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+			Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
 
-        __syncthreads();
+    	    tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+    	    tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
 
-        if (threadY == 0) {
-            //L_all[block*L_BLOCK + k]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
-            L_all[block*L_BLOCK + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
-        }
-        }
+    	    __syncthreads();
 
-
-
+    	    if (threadY == 0) {
+    	        //L_all[block*L_BLOCK + k]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
+    	        L_all[block*L_BLOCK + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+    	    }
+		}
     
     } else{
         gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][threadY] - 
@@ -290,7 +287,6 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
             L_all[block*L_BLOCK + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
         }
 	}
-	}
 }
 
 //__global__ void interLeave(float * src, float * des){
@@ -304,23 +300,25 @@ __global__ void deInterLeave(float * src, float * des){
     //des[interLeaveTable[tid]] = src[tid];
     des[(((263 + tid*480)%6144)*tid)%6144] = src[tid];
     des[tid + 6144+3] = src[(((263 + tid*480)%6144)*tid)%6144 + 6144 +3];
-if (tid == 0){
-for (int i = 0; i < M; i++){
-    des[6144+i] = 0;
-    des[6144+3+6144+i] = 0;
-    }
-}
+
+	if (tid == 0){
+	for (int i = 0; i < M; i++){
+	    des[6144+i] = 0;
+	    des[6144+3+6144+i] = 0;
+	    }
+	}
 }
 
 __global__ void extrinsicInformation(float * L_all, float * msg, float * L_a, float * L_e) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     L_e[tid] = L_all[tid + 6144+3] - 2*msg[tid + 6144+3] - L_a[tid + 6144+3];
     L_e[tid + 6144+3] = L_all[tid] - 2*msg[tid] - L_a[tid];
+
     if (tid == 0){
-	for (int i = 0; i < 3; i++){
-		L_e[6144+i] = L_all[6144+3+6144+i] - 2*msg[6144+3+6144+i] - L_a[6144+3+6144+i];
-    		L_e[6144 + 6144+3+i] = L_all[6144+i] - 2*msg[6144+i] - L_a[6144+i];
-	}
+		for (int i = 0; i < 3; i++){
+			L_e[6144+i] = L_all[6144+3+6144+i] - 2*msg[6144+3+6144+i] - L_a[6144+3+6144+i];
+			L_e[6144 + 6144+3+i] = L_all[6144+i] - 2*msg[6144+i] - L_a[6144+i];
+		}
     }
 }
 
@@ -339,27 +337,28 @@ __global__ void demultiplex(float * stream, float * msg, float * parity) {
 		msg[6144 + 3 + tid] = stream[3*((((263 + tid*480)%6144)*tid)%6144)];
         parity[tid]=stream[3*tid+1];
         parity[6144+3+tid]=stream[3*tid+2];
-if (tid == 0){
-    for (int i = 0; i<M; i++){
-        msg[6144+i] = stream[3*6144+2*i];
-        parity[6144+i] = stream[3*6144+2*i+1];
-msg[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i];
-parity[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i+1];
-}
-}
+
+		if (tid == 0){
+		    for (int i = 0; i<M; i++){
+		        msg[6144+i] = stream[3*6144+2*i];
+		        parity[6144+i] = stream[3*6144+2*i+1];
+				msg[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i];
+				parity[6144 + 3+6144 + i] = stream[3*6144+2*3+2*i+1];
+			}
+		}
 }
 
 __global__ void initializeExtrinsicInformation(float * L_e) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
     L_e[tid] = 0;
 	L_e[6144+3+tid] = 0;
-if (tid == 0){
-    for (int i = 0; i < M; i++){
-        L_e[6144+i] = 0;
-        L_e[6144+3+6144+i] = 0;
-}
-}
-    
+
+	if (tid == 0){
+	    for (int i = 0; i < M; i++){
+	        L_e[6144+i] = 0;
+	        L_e[6144+3+6144+i] = 0;
+		}
+	}
 }
 
 __global__ void exestimateInformationBits(float * L_all, int * msghat) {
@@ -375,7 +374,7 @@ __global__ void exestimateInformationBits(float * L_all, int * msghat) {
 void countErrors(int *m, int * mhat, UINT * bitsError, UINT * frameError, UINT iter) {
 
 	bool f_err = false;
-	for (int i=0; i<(L_TOTAL-M);i++) {
+	for (int i=0; i<(L_TOTAL);i++) {
 		if (m[i] != mhat[i]) {
 			bitsError[iter] = bitsError[iter]+1;
 			f_err = true;
@@ -385,6 +384,7 @@ void countErrors(int *m, int * mhat, UINT * bitsError, UINT * frameError, UINT i
 	if (f_err) 
 		frameError[iter] = frameError[iter]+1;
 }
+
 int main(int argc, char* argv[])
 {
 	MODULATION = 1;			//调制阶数：1,2,3,4,6
@@ -404,7 +404,9 @@ int main(int argc, char* argv[])
 
 	int *source = NULL;
 	int *mhat = NULL;
+
 	UINT bits_all,bits_err[MAXITER],frame_err[MAXITER];
+
 	float Ber,Fer;
 
 	int *coded_source = NULL;
@@ -413,7 +415,7 @@ int main(int argc, char* argv[])
 
 	double *after_channel_i,*after_channel_q;
 	float *flow_for_decode = NULL;
-	int *flow_decoded = NULL;
+	//int *flow_decoded = NULL;
 
 	double EbN0dB,sigma;
 	int nf, i1=0;
@@ -426,6 +428,7 @@ int main(int argc, char* argv[])
 	  exit(1);  
 	}
 	mhat=(int *)malloc(source_length*sizeof(int));
+
 	if ((coded_source=(int *)malloc((3*source_length+4*M_num_reg)*sizeof(int)))==NULL)
 	{
 	  printf("\n fail to allocate memory of coded_source \n");
@@ -458,11 +461,11 @@ int main(int argc, char* argv[])
 	  printf("\n fail to allocate memory of flow_for_decode \n");
 	  exit(1);  
 	}
-	if ((flow_decoded=(int *)malloc(N_ITERATION*source_length*sizeof(int)))==NULL)
-	{
-	  printf("\n fail to allocate memory of flow_decoded\n");
-	  exit(1);  
-	}
+	//if ((flow_decoded=(int *)malloc(N_ITERATION*source_length*sizeof(int)))==NULL)
+	//{
+	//  printf("\n fail to allocate memory of flow_decoded\n");
+	//  exit(1);  
+	//}
 	
 	srand((unsigned)time(NULL));
 
@@ -563,7 +566,7 @@ int main(int argc, char* argv[])
 	free(after_channel_i);
 	free(after_channel_q);
 	free(flow_for_decode);
-	free(flow_decoded);
+	//free(flow_decoded);
 
 	cudaFree(yDevice);
 	cudaFree(msgDevice);
@@ -1676,6 +1679,7 @@ void demultiplex(float *rec_turbo, int len_info, double *yk_turbo)
 返回值:
 	无
 ---------------------------------------------------------------*/
+
 void TurboDecoding(float *flow_for_decode, int *flow_decoded,int flow_length)
 {
 	int i;							/* 循环变量 */
@@ -1747,7 +1751,7 @@ void TurboDecoding(float *flow_for_decode, int *flow_decoded,int flow_length)
 		*(La_turbo+i) = *(Le_turbo+i) = *(LLR_all_turbo+i) = 0;
 	}
 
-	for (iteration=0; iteration<N_ITERATION; iteration++)		/* 开始叠代 */
+	for (iteration=0; iteration<MAXITER; iteration++)		/* 开始叠代 */
 	{
 		/* 译码器1: */
 		/* 解交织来自译码器2的外信息 */
