@@ -17,7 +17,7 @@ using namespace std;
 //#define AlphaBetaTHREAD_NUM 8
 
 //#define THREAD_NUM 8
-#define BLOCK_NUM 16
+#define BLOCK_NUM 8
 #define L_BLOCK (L_TOTAL/BLOCK_NUM/4)
 dim3 gridSize(2, BLOCK_NUM);
 dim3 blockSize(4, 8);
@@ -241,14 +241,14 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 	const unsigned int kIndex = blockIdx.x*(6144+3) + (block%(BLOCK_NUM*4))*L_BLOCK;
 
 
-	//float gamma0, gamma1;
+	float gamma0, gamma1;
 
 	INT k;
 
 	__shared__ float Alpha[L_BLOCK+4][4][8];
 	__shared__ float Beta[2][4][8];
-	__shared__ float gamma0[L_BLOCK+3][4][8];
-	__shared__ float gamma1[L_BLOCK+3][4][8];
+	//__shared__ float gamma0[L_BLOCK+3][4][8];
+	//__shared__ float gamma1[L_BLOCK+3][4][8];
 
 	__shared__ float tempSum0[4][8];
 	__shared__ float tempSum1[4][8];
@@ -262,12 +262,12 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 			Alpha[0][threadX][threadY] = 0;
 	}
 
-	for (k=0;k<L_BLOCK+3;k++){
-        gamma0[k][threadX][threadY]=-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
-            -L_a[kIndex + k]/2;
-        gamma1[k][threadX][threadY]=msg[kIndex + k]+parity[kIndex + k]*NextOut[1][threadY]
-            +L_a[kIndex + k]/2;
-	}
+	//for (k=0;k<L_BLOCK+3;k++){
+    //    gamma0[k][threadX][threadY]=-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
+    //        -L_a[kIndex + k]/2;
+    //    gamma1[k][threadX][threadY]=msg[kIndex + k]+parity[kIndex + k]*NextOut[1][threadY]
+    //        +L_a[kIndex + k]/2;
+	//}
 
 
 	// forward recursion,compute Alpha 
@@ -279,12 +279,17 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
         //    //-__logf(1+__expf(L_a[block*L_BLOCK + k-1]));
         //gamma1=msg[kIndex + k-1]+parity[kIndex + k-1]*LastOut[1][threadY]
         //    +L_a[kIndex + k-1]/2;
-		float tempx = gamma0[k-1][threadX][LastState[0][threadY]];
-		float tempy = gamma1[k-1][threadX][LastState[1][threadY]];
+
+		//float tempx = gamma0[k-1][threadX][LastState[0][threadY]];
+		//float tempy = gamma1[k-1][threadX][LastState[1][threadY]];
+        gamma0=-msg[kIndex + k-1]+parity[kIndex + k-1]*NextOut[0][LastState[0][threadY]]
+            -L_a[kIndex + k-1]/2;
+        gamma1=msg[kIndex + k-1]+parity[kIndex + k-1]*NextOut[1][LastState[1][threadY]]
+            +L_a[kIndex + k-1]/2;
 
 		Alpha[k][threadX][threadY] = 
-			E_algorithm(tempx + Alpha[k-1][threadX][LastState[0][threadY]], 
-				tempy + Alpha[k-1][threadX][LastState[1][threadY]]);
+			E_algorithm(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
+				gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
 	}
 
 	// backward recursion,compute Beta
@@ -309,18 +314,26 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
         //}
 
 		for (k=L_BLOCK+2;k>L_BLOCK-1;k--){
-			float tempx = gamma0[k][threadX][threadY];
-			float tempy = gamma1[k][threadX][threadY];
+			gamma0=-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
+				-L_a[kIndex + k]/2;
+			gamma1=msg[kIndex + k]+parity[kIndex + k]*NextOut[1][threadY]
+				+L_a[kIndex + k]/2;
+			//float tempx = gamma0[k][threadX][threadY];
+			//float tempy = gamma1[k][threadX][threadY];
 
 			Beta[0][threadX][threadY] = 
-				E_algorithm(tempx + Beta[1][threadX][NextState[0][threadY]], 
-					tempy + Beta[1][threadX][NextState[1][threadY]]);
+				E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+					gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 
 		__syncthreads();
+		gamma0=-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][LastState[0][threadY]]
+			-L_a[kIndex + k]/2;
+		gamma1=msg[kIndex + k]+parity[kIndex + k]*NextOut[1][LastState[1][threadY]]
+			+L_a[kIndex + k]/2;
 
-        tempSum0[threadX][threadY] = gamma0[k][threadX][LastState[0][threadY]]+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+        tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
 
-        tempSum1[threadX][threadY] = gamma1[k][threadX][LastState[1][threadY]]+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+        tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
 
 		Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
         __syncthreads();
@@ -366,12 +379,16 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 
 	for (k=L_BLOCK-1;k>=0;k--)
 	{
-		float tempx = gamma0[k][threadX][threadY];
-		float tempy = gamma1[k][threadX][threadY];
+		//float tempx = gamma0[k][threadX][threadY];
+		//float tempy = gamma1[k][threadX][threadY];
+		gamma0=-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
+			-L_a[kIndex + k]/2;
+		gamma1=msg[kIndex + k]+parity[kIndex + k]*NextOut[1][threadY]
+			+L_a[kIndex + k]/2;
 
 		Beta[0][threadX][threadY] = 
-			E_algorithm(tempx + Beta[1][threadX][NextState[0][threadY]], 
-				tempy + Beta[1][threadX][NextState[1][threadY]]);
+			E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 		//gamma0 =-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
 		//	-L_a[kIndex + k]/2;	// bit0 
 		//gamma1 =msg[kIndex + k]+parity[kIndex + k]*NextOut[1][threadY]
@@ -382,8 +399,13 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 		//		gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 		__syncthreads();
 
-        tempSum0[threadX][threadY] = gamma0[k][threadX][LastState[0][threadY]]+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
-        tempSum1[threadX][threadY] = gamma1[k][threadX][LastState[1][threadY]]+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+		gamma0=-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][LastState[0][threadY]]
+			-L_a[kIndex + k]/2;
+		gamma1=msg[kIndex + k]+parity[kIndex + k]*NextOut[1][LastState[1][threadY]]
+			+L_a[kIndex + k]/2;
+
+        tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+        tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
 
 		Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
         __syncthreads();
