@@ -36,7 +36,7 @@ dim3 blockSize(4, 8);
 														  3-SOVA译码
                                                           4-const_LogMAP */
 //#define N_ITERATION			8				/* 译码叠代次数 */
-//#define MAX_FRAME_LENGTH	10000			/* 最大帧长 */
+#define MAX_FRAME_LENGTH	10000			/* 最大帧长 */
 /*==================================================*/
 /* 生成阵参数 */
 #define COLUMN_OF_G		4					/* 生成阵列数 */
@@ -135,6 +135,76 @@ __device__ float maxArray(float* arr, UINT length) {
 	}
 	return temp;
 }
+/*---------------------------------------------------------------
+函数:
+	double E_algorithm(double x, double y)
+介绍:
+	Log-MAP中的E算法:log(exp(x) + exp(y)) = max(x,y)+f(-|y-x|).
+参数:
+	输入参数:
+		x,y - 输入数.
+	输出参数:
+		无
+返回值:
+	输出．
+---------------------------------------------------------------*/
+__device__ float E_algorithm(float x, float y)
+{
+	const double lookup_index_Log_MAP[16] = {0.0, 0.08824, 0.19587, 0.31026, 0.43275, 0.56508,
+								0.70963, 0.86972, 1.0502, 1.2587, 1.5078, 1.8212,
+								2.2522, 2.9706, 3.6764, 4.3758};
+	const double lookup_table_Log_MAP[16] = {0.69315, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4, 0.35,
+								0.3, 0.25, 0.2, 0.15, 0.1, 0.05, 0.025, 0.0125};
+	float temp = (y-x)>0? (y-x):(x-y);
+	int i;
+
+	if (temp>=4.3758)
+	{
+		temp = 0;
+	}
+	else
+	{
+		/* 查找下标 */
+		for (i=0; i<16 && temp>=lookup_index_Log_MAP[i]; i++)
+		{
+			;
+		}
+		/* 查找f(-|y-x|) */
+		temp = (float)lookup_table_Log_MAP[i-1];
+	}
+	
+	/* 返回max(x,y)+f(-|y-x|) */
+	return ( (x>y?x:y) + temp );
+}	
+
+/*---------------------------------------------------------------
+函数:
+	double E_algorithm_seq(double *data_seq, int length)
+介绍:
+	序列的E算法.
+参数:
+	输入参数:
+		data_seq - 序列首址.
+		length - 序列长度
+	输出参数:
+		无
+返回值:
+	结果．
+---------------------------------------------------------------*/
+
+__device__ float E_algorithm_seq(float *data_seq, int length)
+{
+	int i;			/* 循环变量 */
+	float temp;
+
+	/* 每两个进行E算法,再与下一个进行E算法 */
+	temp = E_algorithm(*(data_seq+0), *(data_seq+1));
+	for (i=2; i<length; i++)
+	{
+		temp = E_algorithm(temp, *(data_seq+i));
+	}
+	return temp;
+}
 //////////////////////////////////////////////////////////////////////
 // LogMAP component decoder
 // index true decoder1 false decoder2
@@ -168,14 +238,17 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
     const unsigned int threadX = threadIdx.x;
 	//const unsigned int blockNum = (unsigned int)(threadInBlock/8);
 	const unsigned int threadY = threadIdx.y;
+	const unsigned int kIndex = blockIdx.x*(6144+3) + (block%(BLOCK_NUM*4))*L_BLOCK;
 
 
-	float gamma0, gamma1;
+	//float gamma0, gamma1;
 
 	INT k;
 
-	__shared__ float Alpha[L_BLOCK+3][4][8];
+	__shared__ float Alpha[L_BLOCK+4][4][8];
 	__shared__ float Beta[2][4][8];
+	__shared__ float gamma0[L_BLOCK+3][4][8];
+	__shared__ float gamma1[L_BLOCK+3][4][8];
 
 	__shared__ float tempSum0[4][8];
 	__shared__ float tempSum1[4][8];
@@ -183,108 +256,141 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 
 	// initialize Alpha & Beta
 	if ((block == 0 || block == BLOCK_NUM*4)&& threadY != 0) {
-			Alpha[0][threadX][threadY]=-INIFINITY;
+			Alpha[0][threadX][threadY]=-INFTY;
 	}
 	else {
 			Alpha[0][threadX][threadY] = 0;
 	}
 
+	for (k=0;k<L_BLOCK+3;k++){
+        gamma0[k][threadX][threadY]=-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
+            -L_a[kIndex + k]/2;
+        gamma1[k][threadX][threadY]=msg[kIndex + k]+parity[kIndex + k]*NextOut[1][threadY]
+            +L_a[kIndex + k]/2;
+	}
+
+
 	// forward recursion,compute Alpha 
-	for (k=1;k<L_BLOCK+3;k++)
+	for (k=1;k<L_BLOCK+4;k++)
 	{
-        gamma0=-msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[0][threadY]
-            -L_a[block*L_BLOCK + k-1]/2;
-            //-__logf(1+__expf(L_a[block*L_BLOCK + k-1]));
-        gamma1=msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[1][threadY]
-            +L_a[block*L_BLOCK + k-1]/2;
+        //gamma0=-msg[block*L_BLOCK + k-1]+parity[block*L_BLOCK + k-1]*LastOut[0][threadY]
+        //gamma0=-msg[kIndex + k-1]+parity[kIndex + k-1]*LastOut[0][threadY]
+        //    -L_a[kIndex + k-1]/2;
+        //    //-__logf(1+__expf(L_a[block*L_BLOCK + k-1]));
+        //gamma1=msg[kIndex + k-1]+parity[kIndex + k-1]*LastOut[1][threadY]
+        //    +L_a[kIndex + k-1]/2;
+		float tempx = gamma0[k-1][threadX][LastState[0][threadY]];
+		float tempy = gamma1[k-1][threadX][LastState[1][threadY]];
 
 		Alpha[k][threadX][threadY] = 
-			maxL(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
-				gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
+			E_algorithm(tempx + Alpha[k-1][threadX][LastState[0][threadY]], 
+				tempy + Alpha[k-1][threadX][LastState[1][threadY]]);
 	}
 
 	// backward recursion,compute Beta
     if ((block == BLOCK_NUM*4 - 1 || block == BLOCK_NUM*8 -1) && threadY != 0){
-        Beta[1][threadX][threadY] = -INIFINITY;
+        Beta[1][threadX][threadY] = -INFTY;
     }
     else
         Beta[1][threadX][threadY] = 0;
 
     if (block == BLOCK_NUM*4 - 1 || block == BLOCK_NUM*8 -1){
-        gamma0 = -msg[block*L_BLOCK + L_BLOCK+2]+parity[block*L_BLOCK + L_BLOCK+2]*LastOut[0][threadY] - 
-            L_a[block*L_BLOCK + L_BLOCK+2]/2;
-        gamma1 = msg[block*L_BLOCK + L_BLOCK+2]+parity[block*L_BLOCK + L_BLOCK+2]*LastOut[1][threadY] + 
-            L_a[block*L_BLOCK + L_BLOCK+2]/2;
-        tempSum0[threadX][threadY] = gamma0+Alpha[L_BLOCK+2][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
-        tempSum1[threadX][threadY] = gamma1+Alpha[L_BLOCK+2][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
-        __syncthreads();
+        //gamma0 = -msg[kIndex + L_BLOCK+2]+parity[kIndex + L_BLOCK+2]*LastOut[0][threadY] - 
+        //    L_a[kIndex + L_BLOCK+2]/2;
+        //gamma1 = msg[kIndex + L_BLOCK+2]+parity[kIndex + L_BLOCK+2]*LastOut[1][threadY] + 
+        //    L_a[kIndex + L_BLOCK+2]/2;
+        //tempSum0[threadX][threadY] = gamma0+Alpha[L_BLOCK+2][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+        //tempSum1[threadX][threadY] = gamma1+Alpha[L_BLOCK+2][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+        //__syncthreads();
 
-        if (threadY == 0) {
-            //L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
-            L_all[block*L_BLOCK + L_BLOCK+2]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
-        }
+        //if (threadY == 0) {
+        //    //L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
+        //    L_all[kIndex + L_BLOCK+2]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+        //}
 
-		for (k=L_BLOCK+1;k>=L_BLOCK-1;k--){
-    	         gamma0 =-msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[0][threadY]
-				-L_a[block*L_BLOCK + k]/2;	// bit0 
-			gamma1 =msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[1][threadY]
-				+L_a[block*L_BLOCK + k]/2;	// bit1 
+		for (k=L_BLOCK+2;k>L_BLOCK-1;k--){
+			float tempx = gamma0[k][threadX][threadY];
+			float tempy = gamma1[k][threadX][threadY];
 
 			Beta[0][threadX][threadY] = 
-				maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
-					gamma1 + Beta[1][threadX][NextState[1][threadY]]);
-			__syncthreads();
+				E_algorithm(tempx + Beta[1][threadX][NextState[0][threadY]], 
+					tempy + Beta[1][threadX][NextState[1][threadY]]);
 
-			Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
+		__syncthreads();
 
-    	    tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
-    	    tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+        tempSum0[threadX][threadY] = gamma0[k][threadX][LastState[0][threadY]]+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
 
-    	    __syncthreads();
+        tempSum1[threadX][threadY] = gamma1[k][threadX][LastState[1][threadY]]+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+
+		Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
+        __syncthreads();
+
+			//gamma0 =-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
+			//	-L_a[kIndex + k]/2;	// bit0 
+			//gamma1 =msg[kIndex + k]+parity[kIndex + k]*NextOut[1][threadY]
+			//	+L_a[kIndex + k]/2;	// bit1 
+
+			//Beta[0][threadX][threadY] = 
+			//	E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+			//		gamma1 + Beta[1][threadX][NextState[1][threadY]]);
+			//__syncthreads();
+
+			//Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
+
+    	    //tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+    	    //tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+
+    	    //__syncthreads();
 
     	    if (threadY == 0) {
     	        //L_all[block*L_BLOCK + k]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
-    	        L_all[block*L_BLOCK + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+    	        L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - E_algorithm_seq(*(tempSum0+threadX), 8); 
     	    }
 		}
     
-    } else{
-        gamma0 = -msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[0][threadY] - 
-            L_a[block*L_BLOCK + L_BLOCK-1]/2;
-        gamma1 = msg[block*L_BLOCK + L_BLOCK-1]+parity[block*L_BLOCK + L_BLOCK-1]*LastOut[1][threadY] + 
-            L_a[block*L_BLOCK + L_BLOCK-1]/2;
-        tempSum0[threadX][threadY] = gamma0+Alpha[L_BLOCK-1][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
-        tempSum1[threadX][threadY] = gamma1+Alpha[L_BLOCK-1][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
-        __syncthreads();
+    } 
+	//else{
+    //    gamma0 = -msg[kIndex + L_BLOCK-1]+parity[kIndex + L_BLOCK-1]*LastOut[0][threadY] - 
+    //        L_a[kIndex + L_BLOCK-1]/2;
+    //    gamma1 = msg[kIndex + L_BLOCK-1]+parity[kIndex + L_BLOCK-1]*LastOut[1][threadY] + 
+    //        L_a[kIndex + L_BLOCK-1]/2;
+    //    tempSum0[threadX][threadY] = gamma0+Alpha[L_BLOCK-1][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+    //    tempSum1[threadX][threadY] = gamma1+Alpha[L_BLOCK-1][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+    //    __syncthreads();
 
-        if (threadY == 0) {
-            //L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
-            L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
-        }
-    }
+    //    if (threadY == 0) {
+    //        //L_all[block*L_BLOCK + L_BLOCK-1]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
+    //        L_all[kIndex + L_BLOCK-1]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+    //    }
+    //}
 
-	for (k=L_BLOCK-2;k>=0;k--)
+	for (k=L_BLOCK-1;k>=0;k--)
 	{
-		gamma0 =-msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[0][threadY]
-			-L_a[block*L_BLOCK + k]/2;	// bit0 
-		gamma1 =msg[block*L_BLOCK + k]+parity[block*L_BLOCK + k]*NextOut[1][threadY]
-			+L_a[block*L_BLOCK + k]/2;	// bit1 
+		float tempx = gamma0[k][threadX][threadY];
+		float tempy = gamma1[k][threadX][threadY];
 
 		Beta[0][threadX][threadY] = 
-			maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
-				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
+			E_algorithm(tempx + Beta[1][threadX][NextState[0][threadY]], 
+				tempy + Beta[1][threadX][NextState[1][threadY]]);
+		//gamma0 =-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
+		//	-L_a[kIndex + k]/2;	// bit0 
+		//gamma1 =msg[kIndex + k]+parity[kIndex + k]*NextOut[1][threadY]
+		//	+L_a[kIndex + k]/2;	// bit1 
+
+		//Beta[0][threadX][threadY] = 
+		//	E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+		//		gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 		__syncthreads();
 
+        tempSum0[threadX][threadY] = gamma0[k][threadX][LastState[0][threadY]]+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
+        tempSum1[threadX][threadY] = gamma1[k][threadX][LastState[1][threadY]]+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
+
 		Beta[1][threadX][threadY]=Beta[0][threadX][threadY];
-
-        tempSum0[threadX][threadY] = gamma0+Alpha[k][threadX][LastState[0][threadY]]+Beta[1][threadX][threadY];
-        tempSum1[threadX][threadY] = gamma1+Alpha[k][threadX][LastState[1][threadY]]+Beta[1][threadX][threadY];
-
         __syncthreads();
 
         if (threadY == 0) {
             //L_all[block*L_BLOCK + k]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
-            L_all[block*L_BLOCK + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+            L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - E_algorithm_seq(*(tempSum0+threadX), 8); 
         }
 	}
 }
@@ -1315,71 +1421,6 @@ double get_max(double *data_seq, int length)
 
 
 
-/*---------------------------------------------------------------
-函数:
-	double E_algorithm(double x, double y)
-介绍:
-	Log-MAP中的E算法:log(exp(x) + exp(y)) = max(x,y)+f(-|y-x|).
-参数:
-	输入参数:
-		x,y - 输入数.
-	输出参数:
-		无
-返回值:
-	输出．
----------------------------------------------------------------*/
-double E_algorithm(double x, double y)
-{
-	double temp = (y-x)>0? (y-x):(x-y);
-	int i;
-
-	if (temp>=4.3758)
-	{
-		temp = 0;
-	}
-	else
-	{
-		/* 查找下标 */
-		for (i=0; i<16 && temp>=lookup_index_Log_MAP[i]; i++)
-		{
-			;
-		}
-		/* 查找f(-|y-x|) */
-		temp = (double)lookup_table_Log_MAP[i-1];
-	}
-	
-	/* 返回max(x,y)+f(-|y-x|) */
-	return ( (x>y?x:y) + temp );
-}	
-
-/*---------------------------------------------------------------
-函数:
-	double E_algorithm_seq(double *data_seq, int length)
-介绍:
-	序列的E算法.
-参数:
-	输入参数:
-		data_seq - 序列首址.
-		length - 序列长度
-	输出参数:
-		无
-返回值:
-	结果．
----------------------------------------------------------------*/
-
-double E_algorithm_seq(double *data_seq, int length)
-{
-	int i;			/* 循环变量 */
-	double temp;
-
-	/* 每两个进行E算法,再与下一个进行E算法 */
-	temp = E_algorithm(*(data_seq+0), *(data_seq+1));
-	for (i=2; i<length; i++)
-	{
-		temp = E_algorithm(temp, *(data_seq+i));
-	}
-	return temp;
-}
 
 /*---------------------------------------------------------------
 函数:
@@ -1516,7 +1557,7 @@ void Log_MAP_decoder(double *recs_turbo, double *La_turbo, int terminated, doubl
 					+ *(alpha_Log+(*(turbo_trellis.mx_laststat+j*2+0))*(len_total+1)+i-1);
 			tempy = *(gama_Log+(*(turbo_trellis.mx_laststat+j*2+1))*len_total*2+(i-1)*2+1)
 					+ *(alpha_Log+(*(turbo_trellis.mx_laststat+j*2+1))*(len_total+1)+i-1);
-			*(alpha_Log+j*(len_total+1)+i) = E_algorithm(tempx, tempy);
+			//*(alpha_Log+j*(len_total+1)+i) = E_algorithm(tempx, tempy);
 		}	/* 按状态循环结束 */
 
 		/* 计算tempmax[i],用于规一化alpha和beta */
@@ -1546,7 +1587,7 @@ void Log_MAP_decoder(double *recs_turbo, double *La_turbo, int terminated, doubl
 			tempy = *(gama_Log+j*len_total*2+i*2+1) 
 					+ *(beta_Log+(*(turbo_trellis.mx_nextstat+j*2+1))*(len_total+1)+i+1);
 
-			*(beta_Log+j*(len_total+1)+i) = E_algorithm(tempx, tempy);
+			//*(beta_Log+j*(len_total+1)+i) = E_algorithm(tempx, tempy);
 		}	/* 按状态循环结束 */
 
 		/* 规一化beta */
@@ -1571,7 +1612,7 @@ void Log_MAP_decoder(double *recs_turbo, double *La_turbo, int terminated, doubl
 		}	/* 按状态循环结束 */
 
 		/* 计算似然比 */
-		*(LLR_all_turbo+i) = E_algorithm_seq(temp1, n_states) - E_algorithm_seq(temp0, n_states);
+		//*(LLR_all_turbo+i) = E_algorithm_seq(temp1, n_states) - E_algorithm_seq(temp0, n_states);
 	}	/* 逐比特循环结束 */
 
 	free(alpha_Log);
