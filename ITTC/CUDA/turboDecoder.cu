@@ -209,7 +209,7 @@ __device__ float E_algorithm_seq(float *data_seq, int length)
 // LogMAP component decoder
 // index true decoder1 false decoder2
 //////////////////////////////////////////////////////////////////////
-__global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
+__global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, float* AlphaI, float* BetaI)
 {
 
     const char NextOut[2][NSTATE] = // check bit based on current and input bit
@@ -253,14 +253,15 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 	__shared__ float tempSum0[4][8];
 	__shared__ float tempSum1[4][8];
 
+	Alpha[0][threadX][threadY]=AlphaI[block*8+threadY];
 
 	// initialize Alpha & Beta
-	if ((block == 0 || block == BLOCK_NUM*4)&& threadY != 0) {
-			Alpha[0][threadX][threadY]=-INFTY;
-	}
-	else {
-			Alpha[0][threadX][threadY] = 0;
-	}
+	//if ((block == 0 || block == BLOCK_NUM*4)&& threadY != 0) {
+//			Alpha[0][threadX][threadY]=-INFTY;
+//	}
+//	else {
+//			Alpha[0][threadX][threadY] = 0;
+	//}
 
 	//for (k=0;k<L_BLOCK+3;k++){
     //    gamma0[k][threadX][threadY]=-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
@@ -292,12 +293,18 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 				gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
 	}
 
+	__syncthreads();
+	if (block != BLOCK_NUM*4 -1 && block != BLOCK_NUM*8 - 1){
+		AlphaI[(block+1)*8 + threadY] = Alpha[L_BLOCK-1][threadX][threadY];
+	}
+
 	// backward recursion,compute Beta
-    if ((block == BLOCK_NUM*4 - 1 || block == BLOCK_NUM*8 -1) && threadY != 0){
-        Beta[1][threadX][threadY] = -INFTY;
-    }
-    else
-        Beta[1][threadX][threadY] = 0;
+    //if ((block == BLOCK_NUM*4 - 1 || block == BLOCK_NUM*8 -1) && threadY != 0){
+    //    Beta[1][threadX][threadY] = -INFTY;
+    //}
+    //else
+    //    Beta[1][threadX][threadY] = 0;
+        Beta[1][threadX][threadY] = BetaI[block*8 + threadY];
 
     if (block == BLOCK_NUM*4 - 1 || block == BLOCK_NUM*8 -1){
         //gamma0 = -msg[kIndex + L_BLOCK+2]+parity[kIndex + L_BLOCK+2]*LastOut[0][threadY] - 
@@ -415,6 +422,10 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
             L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - E_algorithm_seq(*(tempSum0+threadX), 8); 
         }
 	}
+	__syncthreads();
+	if (block != BLOCK_NUM*4  && block != 0){
+		BetaI[(block-1)*8 + threadY] = Beta[1][threadX][threadY];
+	}
 }
 
 //__global__ void interLeave(float * src, float * des){
@@ -487,6 +498,29 @@ __global__ void initializeExtrinsicInformation(float * L_e) {
 	        L_e[6144+3+6144+i] = 0;
 		}
 	}
+}
+__global__ void initializeAlphaAndBeta(float* Alpha, float* Beta){
+    const unsigned int block = 4*(blockIdx.x*BLOCK_NUM + blockIdx.y) + threadIdx.x;
+	//const unsigned int decoderIndex = unsigned int(block/BLOCK_NUM);
+    //const unsigned int threadX = threadIdx.x;
+	//const unsigned int blockNum = (unsigned int)(threadInBlock/8);
+	const unsigned int threadY = threadIdx.y;
+	//const unsigned int kIndex = blockIdx.x*(6144+3) + (block%(BLOCK_NUM*4))*L_BLOCK;
+
+	// initialize Alpha & Beta
+	if ((block == 0 || block == BLOCK_NUM*4)&& threadY != 0) {
+			Alpha[block*8+threadY]=-INFTY;
+	}
+	else {
+			Alpha[block*8+threadY] = 0;
+	}
+
+    if ((block == BLOCK_NUM*4 - 1 || block == BLOCK_NUM*8 -1) && threadY != 0){
+        Beta[block*8+threadY] = -INFTY;
+    }
+    else
+        Beta[block*8+threadY] = 0;
+	
 }
 
 __global__ void exestimateInformationBits(float * L_all, int * msghat) {
@@ -606,6 +640,8 @@ int main(int argc, char* argv[])
 	float * L_eDevice;
 	float * L_aDevice;
 	float * L_allDevice;
+	float* AlphaDevice;
+	float* BetaDevice;
 
     cudaMalloc((void **)&yDevice, L_ALL*sizeof(float));
     cudaMalloc((void **)&msgDevice, L_TOTAL_NUM*2*sizeof(float));
@@ -614,6 +650,8 @@ int main(int argc, char* argv[])
     cudaMalloc((void **)&L_eDevice, L_TOTAL_NUM*2*sizeof(float));
     cudaMalloc((void **)&L_aDevice, L_TOTAL_NUM*2*sizeof(float));
     cudaMalloc((void **)&L_allDevice, L_TOTAL_NUM*2*sizeof(float));
+    cudaMalloc((void **)&AlphaDevice, BLOCK_NUM*4*2*8*sizeof(float));
+    cudaMalloc((void **)&BetaDevice, BLOCK_NUM*4*2*8*sizeof(float));
 
 	for (EbN0dB=EbN0start; EbN0dB<=EbN0end; EbN0dB+=EbN0step)
 	{
@@ -647,12 +685,13 @@ int main(int argc, char* argv[])
 
 			demultiplex<<<LEAVER_BLOCK,LEAVER_THREAD>>>(yDevice, msgDevice, parityDevice); 
 			initializeExtrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice);
+			initializeAlphaAndBeta<<<gridSize,blockSize>>>(AlphaDevice, BetaDevice);
 
 			for (int iter = 0; iter<MAXITER; iter++) {
 				
 				deInterLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
 
-                logmap<<<gridSize, blockSize>>>(msgDevice, parityDevice, L_aDevice, L_allDevice);
+                logmap<<<gridSize, blockSize>>>(msgDevice, parityDevice, L_aDevice, L_allDevice, AlphaDevice, BetaDevice);
 
 				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
 
