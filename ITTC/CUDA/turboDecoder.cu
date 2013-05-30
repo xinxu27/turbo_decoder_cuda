@@ -11,7 +11,7 @@ using namespace std;
 #define M	3	// register length,=tail length
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
 #define L_TOTAL_NUM 6147 
-#define MAXITER 10
+#define MAXITER 15
 #define	FRAME_NUM 10000
 //#define AlphaBetaBLOCK_NUM 8
 //#define AlphaBetaTHREAD_NUM 8
@@ -288,7 +288,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
             +L_a[kIndex + k-1]/2;
 
 		Alpha[k][threadX][threadY] = 
-			E_algorithm(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
+			maxL(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
 				gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
 	}
 
@@ -322,7 +322,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 			//float tempy = gamma1[k][threadX][threadY];
 
 			Beta[0][threadX][threadY] = 
-				E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+				maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
 					gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 
 		__syncthreads();
@@ -344,7 +344,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 			//	+L_a[kIndex + k]/2;	// bit1 
 
 			//Beta[0][threadX][threadY] = 
-			//	E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+			//	maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
 			//		gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 			//__syncthreads();
 
@@ -357,7 +357,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 
     	    if (threadY == 0) {
     	        //L_all[block*L_BLOCK + k]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
-    	        L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - E_algorithm_seq(*(tempSum0+threadX), 8); 
+    	        L_all[kIndex + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
     	    }
 		}
     
@@ -387,7 +387,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 			+L_a[kIndex + k]/2;
 
 		Beta[0][threadX][threadY] = 
-			E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+			maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
 				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 		//gamma0 =-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][threadY]
 		//	-L_a[kIndex + k]/2;	// bit0 
@@ -395,7 +395,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 		//	+L_a[kIndex + k]/2;	// bit1 
 
 		//Beta[0][threadX][threadY] = 
-		//	E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+		//	maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
 		//		gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 		__syncthreads();
 
@@ -412,7 +412,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all)
 
         if (threadY == 0) {
             //L_all[block*L_BLOCK + k]= maxArray(tempSum1[threadX], 8) - maxArray(tempSum0[threadX], 8); 
-            L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - E_algorithm_seq(*(tempSum0+threadX), 8); 
+            L_all[kIndex + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
         }
 	}
 }
