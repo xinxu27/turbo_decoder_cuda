@@ -26,8 +26,8 @@
 using namespace std;
 
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
-#define MAXITER 6
-#define	FRAME_NUM 10000
+#define MAXITER 12
+#define	FRAME_NUM 100
 #define AlphaBetaBLOCK_NUM 8
 #define AlphaBetaTHREAD_NUM 8
 
@@ -1156,7 +1156,7 @@ int main(int argc, char* argv[])
     //cudaMemcpy(tableDevice,m_Inter_table,sizeof(unsigned int)*L_TOTAL, cudaMemcpyHostToDevice);
 
 	//for (Eb_No_dB= 0.0;Eb_No_dB<1.0;Eb_No_dB+=1.1){
-	for (Eb_No_dB= -3.0;Eb_No_dB<4.0;Eb_No_dB+=0.1) {
+	for (Eb_No_dB= -4.7;Eb_No_dB<-3.7;Eb_No_dB+=0.1) {
 		No = 1/pow(10.0,Eb_No_dB/10.0);
 		bits_all = 0;
 		for (i =0; i<MAXITER;i++) {
@@ -1205,15 +1205,15 @@ int main(int argc, char* argv[])
 
 				exestimateInformationBits<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, mhatDevice); 
 
-				//cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
-				//countErrors(m, mhat, bits_err, frame_err, iter);
+				cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
+				countErrors(m, mhat, bits_err, frame_err, iter);
 
 			}
 			finish = clock();
 			duration[frame] = (long double)(finish - start);
 
-			cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
-			countErrors(m, mhat, bits_err, frame_err, MAXITER-1);
+			//cudaMemcpy(mhat, mhatDevice, sizeof(BYTE)*L_TOTAL, cudaMemcpyDeviceToHost);
+			//countErrors(m, mhat, bits_err, frame_err, MAXITER-1);
 
 		}
 
