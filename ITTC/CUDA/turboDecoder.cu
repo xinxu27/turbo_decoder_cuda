@@ -11,8 +11,8 @@ using namespace std;
 #define M	3	// register length,=tail length
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
 #define L_TOTAL_NUM 6147 
-#define MAXITER 15
-#define	FRAME_NUM 10000
+#define MAXITER 30
+#define	FRAME_NUM 100
 //#define AlphaBetaBLOCK_NUM 8
 //#define AlphaBetaTHREAD_NUM 8
 

@@ -11,7 +11,7 @@ using namespace std;
 #define M	3	// register length,=tail length
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
 #define L_TOTAL_NUM 6147 
-#define MAXITER 30
+#define MAXITER 15
 #define	FRAME_NUM 100
 //#define AlphaBetaBLOCK_NUM 8
 //#define AlphaBetaTHREAD_NUM 8
@@ -243,6 +243,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
 
 	__shared__ float tempSum0[4][8];
 	__shared__ float tempSum1[4][8];
+	__shared__ float max_branch[4][L_BLOCK+4];
 
 	Alpha[0][threadX][threadY]=AlphaI[block*8+threadY];
 
@@ -282,11 +283,24 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
 		Alpha[k][threadX][threadY] = 
 			maxL(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
 				gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
+			//E_algorithm(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
+			//	gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
+		__syncthreads();
+
+	// normalization,prevent overflow
+	if (threadY == 0){
+         max_branch[threadX][k]=Alpha[k][threadX][0];
+         for (int s2=1;s2<8;s2++)
+             if (Alpha[k][threadX][s2]>max_branch[threadX][k])
+                 max_branch[threadX][k]=Alpha[k][threadX][s2];
+	}
+	 __syncthreads();
+	 Alpha[k][threadX][threadY]=Alpha[k][threadX][threadY]-max_branch[threadX][k];
 	}
 
 	__syncthreads();
 	if (block != BLOCK_NUM*4 -1 && block != BLOCK_NUM*8 - 1){
-		AlphaI[(block+1)*8 + threadY] = Alpha[L_BLOCK-1][threadX][threadY];
+		AlphaI[(block+1)*8 + threadY] = Alpha[L_BLOCK][threadX][threadY];
 	}
 
 	// backward recursion,compute Beta
@@ -320,8 +334,12 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
 			//float tempy = gamma1[k][threadX][threadY];
 
 			Beta[0][threadX][threadY] = 
+				//E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+				//	gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 				maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
 					gamma1 + Beta[1][threadX][NextState[1][threadY]]);
+
+	 Beta[0][threadX][threadY]=Beta[0][threadX][threadY]-max_branch[threadX][k+1];
 
 		__syncthreads();
 		gamma0=-msg[kIndex + k]+parity[kIndex + k]*NextOut[0][LastState[0][threadY]]
@@ -337,6 +355,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
         __syncthreads();
 
 			if (threadY == 0) {
+				//L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
 				L_all[kIndex + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
 			}
 		}
@@ -350,8 +369,12 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
 			+L_a[kIndex + k]/2;
 
 		Beta[0][threadX][threadY] = 
+			//E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+			//	gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 			maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
 				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
+
+	 Beta[0][threadX][threadY]=Beta[0][threadX][threadY]-max_branch[threadX][k+1];
 
 		__syncthreads();
 
@@ -367,6 +390,7 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
         __syncthreads();
 
         if (threadY == 0) {
+            //L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
             L_all[kIndex + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
         }
 	}
@@ -398,8 +422,8 @@ __global__ void deInterLeave(float * src, float * des){
 
 __global__ void extrinsicInformation(float * L_all, float * msg, float * L_a, float * L_e) {
     unsigned int tid = blockIdx.x*blockDim.x + threadIdx.x;
-    L_e[tid] = L_all[tid + 6144+3] - 2*msg[tid + 6144+3] - L_a[tid + 6144+3];
-    L_e[tid + 6144+3] = L_all[tid] - 2*msg[tid] - L_a[tid];
+    L_e[tid] = 0.77*(L_all[tid + 6144+3] - 2*msg[tid + 6144+3] - L_a[tid + 6144+3]);
+    L_e[tid + 6144+3] = 0.77*(L_all[tid] - 2*msg[tid] - L_a[tid]);
 
     if (tid == 0){
 		for (int i = 0; i < 3; i++){
@@ -592,6 +616,7 @@ int main(int argc, char* argv[])
 	float * L_allDevice;
 	float* AlphaDevice;
 	float* BetaDevice;
+	float* AlphaHost;
 
     cudaMalloc((void **)&yDevice, L_ALL*sizeof(float));
     cudaMalloc((void **)&msgDevice, L_TOTAL_NUM*2*sizeof(float));
@@ -602,6 +627,7 @@ int main(int argc, char* argv[])
     cudaMalloc((void **)&L_allDevice, L_TOTAL_NUM*2*sizeof(float));
     cudaMalloc((void **)&AlphaDevice, BLOCK_NUM*4*2*8*sizeof(float));
     cudaMalloc((void **)&BetaDevice, BLOCK_NUM*4*2*8*sizeof(float));
+	AlphaHost = (float*)malloc(sizeof(float)*BLOCK_NUM*64);
 
 	for (EbN0dB=EbN0start; EbN0dB<=EbN0end; EbN0dB+=EbN0step)
 	{
@@ -643,6 +669,7 @@ int main(int argc, char* argv[])
 				deInterLeave<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_eDevice, L_aDevice);
 
                 logmap<<<gridSize, blockSize>>>(msgDevice, parityDevice, L_aDevice, L_allDevice, AlphaDevice, BetaDevice);
+				//cudaMemcpy(AlphaHost, AlphaDevice, sizeof(float)*BLOCK_NUM*64, cudaMemcpyDeviceToHost);
 
 				extrinsicInformation<<<LEAVER_BLOCK,LEAVER_THREAD>>>(L_allDevice, msgDevice, L_aDevice, L_eDevice);
 
@@ -1592,6 +1619,7 @@ void AWGN(double *send, double *r, double sigma, int totallength)
 	for(i=0; i<totallength; i++)
 	{
 		*(r+i) = (double)( *(send+i) + *(noise+i) );
+		//*(r+i) = (double)( *(send+i) + *(noise+i) );
 		//*(r+i) = (double)( *(send+i) + 0 );
 	}
 	free(noise);
