@@ -11,13 +11,13 @@ using namespace std;
 #define M	3	// register length,=tail length
 #define L_TOTAL 6144// if u want to use block interleave,L_TOTAL must = x^2
 #define L_TOTAL_NUM 6147 
-#define MAXITER 15
-#define	FRAME_NUM 100
+#define MAXITER 25
+#define	FRAME_NUM 10000
 //#define AlphaBetaBLOCK_NUM 8
 //#define AlphaBetaTHREAD_NUM 8
 
 //#define THREAD_NUM 8
-#define BLOCK_NUM 8
+#define BLOCK_NUM 28
 #define L_BLOCK (L_TOTAL/BLOCK_NUM/4)
 dim3 gridSize(2, BLOCK_NUM);
 dim3 blockSize(4, 8);
@@ -281,10 +281,10 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
             +L_a[kIndex + k-1]/2;
 
 		Alpha[k][threadX][threadY] = 
-			//maxL(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
-			//	gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
-			E_algorithm(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
+			maxL(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
 				gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
+			//E_algorithm(gamma0 + Alpha[k-1][threadX][LastState[0][threadY]], 
+			//	gamma1 + Alpha[k-1][threadX][LastState[1][threadY]]);
 		__syncthreads();
 
 	// normalization,prevent overflow
@@ -334,10 +334,10 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
 			//float tempy = gamma1[k][threadX][threadY];
 
 			Beta[0][threadX][threadY] = 
-				E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
-					gamma1 + Beta[1][threadX][NextState[1][threadY]]);
-				//maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+				//E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
 				//	gamma1 + Beta[1][threadX][NextState[1][threadY]]);
+				maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+					gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 
 	 Beta[0][threadX][threadY]=Beta[0][threadX][threadY]-max_branch[threadX][k+1];
 
@@ -355,8 +355,8 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
         __syncthreads();
 
 			if (threadY == 0) {
-				L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - E_algorithm_seq(*(tempSum0+threadX), 8); 
-				//L_all[kIndex + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+				//L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - E_algorithm_seq(*(tempSum0+threadX), 8); 
+				L_all[kIndex + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
 			}
 		}
     } 
@@ -369,10 +369,10 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
 			+L_a[kIndex + k]/2;
 
 		Beta[0][threadX][threadY] = 
-			E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
-				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
-			//maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+			//E_algorithm(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
 			//	gamma1 + Beta[1][threadX][NextState[1][threadY]]);
+			maxL(gamma0 + Beta[1][threadX][NextState[0][threadY]], 
+				gamma1 + Beta[1][threadX][NextState[1][threadY]]);
 
 	 Beta[0][threadX][threadY]=Beta[0][threadX][threadY]-max_branch[threadX][k+1];
 
@@ -390,8 +390,8 @@ __global__ void logmap(float *msg, float* parity, float* L_a, float* L_all, floa
         __syncthreads();
 
         if (threadY == 0) {
-            L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - E_algorithm_seq(*(tempSum0+threadX), 8); 
-            //L_all[kIndex + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
+            //L_all[kIndex + k]= E_algorithm_seq(*(tempSum1+threadX), 8) - E_algorithm_seq(*(tempSum0+threadX), 8); 
+            L_all[kIndex + k]= maxArray(*(tempSum1+threadX), 8) - maxArray(*(tempSum0+threadX), 8); 
         }
 	}
 	__syncthreads();
@@ -616,7 +616,7 @@ int main(int argc, char* argv[])
 	float * L_allDevice;
 	float* AlphaDevice;
 	float* BetaDevice;
-	float* AlphaHost;
+	//float* AlphaHost;
 
     cudaMalloc((void **)&yDevice, L_ALL*sizeof(float));
     cudaMalloc((void **)&msgDevice, L_TOTAL_NUM*2*sizeof(float));
@@ -627,7 +627,7 @@ int main(int argc, char* argv[])
     cudaMalloc((void **)&L_allDevice, L_TOTAL_NUM*2*sizeof(float));
     cudaMalloc((void **)&AlphaDevice, BLOCK_NUM*4*2*8*sizeof(float));
     cudaMalloc((void **)&BetaDevice, BLOCK_NUM*4*2*8*sizeof(float));
-	AlphaHost = (float*)malloc(sizeof(float)*BLOCK_NUM*64);
+	//AlphaHost = (float*)malloc(sizeof(float)*BLOCK_NUM*64);
 
 	for (EbN0dB=EbN0start; EbN0dB<=EbN0end; EbN0dB+=EbN0step)
 	{
