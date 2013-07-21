@@ -1,1 +1,13 @@
-cat 12_4Blocks_Bian_Max_10000Fs_Iter25_06_27.txt | grep 'Ber' | cut -d '=' -f2 | awk 'NR%25 == 10{print $0}'
+#!/bin/bash
+
+max=25
+for i in *Max*
+do
+    block_num=$(cut -d '-' -f1 $i)
+    echo $block_num
+    for (( iter=6; iter<=$max; iter=iter+1 ))
+    do
+        echo hello
+        #cat $i | grep 'Ber' | cut -d '=' -f2 | awk 'NR%25 == "'$iter'"{print $0}' > Iters${iter}_${i}
+    done
+done
