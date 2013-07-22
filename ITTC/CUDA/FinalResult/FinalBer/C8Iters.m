@@ -1,6 +1,8 @@
 clear all;
 clc;
 format long;
+load Iters8_1;
+y1 = Iters8_1;
 load Iters8_32;
 y32 = Iters8_32;
 load Iters8_48;
@@ -15,7 +17,7 @@ y128 = Iters8_128;
 
 x=(0:0.1:1.0);
 
-semilogy(x,y32,'-ok',x,y48,':x',x,y64,'--p',x,y96,'-*',x,y128,'-.+','linewidth',2);
+semilogy(x,y1,x,y32,'-ok',x,y48,':x',x,y64,'--p',x,y96,'-*',x,y128,'-.+','linewidth',2);
 
 grid on;
 title('Iterations = 8');
