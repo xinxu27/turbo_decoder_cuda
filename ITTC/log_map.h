@@ -27,7 +27,7 @@
 														  2-MAX-LogMAP译码
 														  3-SOVA译码
                                                           4-const_LogMAP */
-#define N_ITERATION			8				/* 译码叠代次数 */
+#define N_ITERATION			10				/* 译码叠代次数 */
 #define MAX_FRAME_LENGTH	10000			/* 最大帧长 */
 /*==================================================*/
 /* 生成阵参数 */

@@ -1,0 +1,99 @@
+block error rate: 1.0000000000 bit error rate: 0.1412983813 
+block error rate: 1.0000000000 bit error rate: 0.1101888021 
+block error rate: 1.0000000000 bit error rate: 0.0948159212 
+block error rate: 1.0000000000 bit error rate: 0.0854938981 
+block error rate: 1.0000000000 bit error rate: 0.0782909518 
+block error rate: 1.0000000000 bit error rate: 0.0729804943 
+block error rate: 0.9803921569 bit error rate: 0.0682604422 
+block error rate: 0.9803921569 bit error rate: 0.0638691023 
+
+block error rate: 1.0000000000 bit error rate: 0.1336186727 
+block error rate: 1.0000000000 bit error rate: 0.0990015666 
+block error rate: 1.0000000000 bit error rate: 0.0802663167 
+block error rate: 1.0000000000 bit error rate: 0.0664596558 
+block error rate: 1.0000000000 bit error rate: 0.0551198324 
+block error rate: 1.0000000000 bit error rate: 0.0454788208 
+block error rate: 0.8750000000 bit error rate: 0.0369084676 
+block error rate: 0.7812500000 bit error rate: 0.0295664469 
+
+block error rate: 1.0000000000 bit error rate: 0.1256735777 
+block error rate: 1.0000000000 bit error rate: 0.0855443710 
+block error rate: 1.0000000000 bit error rate: 0.0621118790 
+block error rate: 1.0000000000 bit error rate: 0.0438551683 
+block error rate: 0.9923076923 bit error rate: 0.0288887220 
+block error rate: 0.8384615385 bit error rate: 0.0183405950 
+block error rate: 0.5615384615 bit error rate: 0.0118765024 
+block error rate: 0.3846153846 bit error rate: 0.0078287760 
+
+block error rate: 1.0000000000 bit error rate: 0.1177050715 
+block error rate: 1.0000000000 bit error rate: 0.0728464367 
+block error rate: 1.0000000000 bit error rate: 0.0450892952 
+block error rate: 0.9979550102 bit error rate: 0.0243548164 
+block error rate: 0.8384458078 bit error rate: 0.0109808362 
+block error rate: 0.4703476483 bit error rate: 0.0047067383 
+block error rate: 0.2024539877 bit error rate: 0.0021941036 
+block error rate: 0.1022494888 bit error rate: 0.0010670959 
+
+block error rate: 1.0000000000 bit error rate: 0.1095242098 
+block error rate: 1.0000000000 bit error rate: 0.0607578295 
+block error rate: 1.0000000000 bit error rate: 0.0304967409 
+block error rate: 0.9577442664 bit error rate: 0.0111217828 
+block error rate: 0.5405278040 bit error rate: 0.0028290552 
+block error rate: 0.1613257933 bit error rate: 0.0006170118 
+block error rate: 0.0344015080 bit error rate: 0.0001497979 
+block error rate: 0.0078542256 bit error rate: 0.0000471458 
+
+block error rate: 1.0000000000 bit error rate: 0.1016001302 
+block error rate: 1.0000000000 bit error rate: 0.0489443034 
+block error rate: 0.9995000000 bit error rate: 0.0182206868 
+block error rate: 0.7880000000 bit error rate: 0.0037564290 
+block error rate: 0.2024000000 bit error rate: 0.0004613770 
+block error rate: 0.0248000000 bit error rate: 0.0000474284 
+block error rate: 0.0034000000 bit error rate: 0.0000065430 
+block error rate: 0.0006000000 bit error rate: 0.0000009766 
+
+block error rate: 1.0000000000 bit error rate: 0.0938658854 
+block error rate: 1.0000000000 bit error rate: 0.0383488770 
+block error rate: 0.9935000000 bit error rate: 0.0097232259 
+block error rate: 0.4752000000 bit error rate: 0.0009648763 
+block error rate: 0.0409000000 bit error rate: 0.0000489258 
+block error rate: 0.0029000000 bit error rate: 0.0000040853 
+block error rate: 0.0005000000 bit error rate: 0.0000002930 
+block error rate: 0.0001000000 bit error rate: 0.0000000326 
+
+block error rate: 1.0000000000 bit error rate: 0.0858039551 
+block error rate: 1.0000000000 bit error rate: 0.0286050130 
+block error rate: 0.9431000000 bit error rate: 0.0043884115 
+block error rate: 0.1812000000 bit error rate: 0.0001846354 
+block error rate: 0.0058000000 bit error rate: 0.0000033529 
+block error rate: 0.0003000000 bit error rate: 0.0000001790 
+block error rate: 0.0001000000 bit error rate: 0.0000000326 
+block error rate: 0.0000000000 bit error rate: 0.0000000000 
+
+block error rate: 1.0000000000 bit error rate: 0.0781285807 
+block error rate: 1.0000000000 bit error rate: 0.0205224772 
+block error rate: 0.7833000000 bit error rate: 0.0017247396 
+block error rate: 0.0464000000 bit error rate: 0.0000283040 
+block error rate: 0.0007000000 bit error rate: 0.0000002767 
+block error rate: 0.0001000000 bit error rate: 0.0000000814 
+block error rate: 0.0001000000 bit error rate: 0.0000002116 
+block error rate: 0.0000000000 bit error rate: 0.0000000000 
+
+block error rate: 1.0000000000 bit error rate: 0.0703047852 
+block error rate: 1.0000000000 bit error rate: 0.0138673014 
+block error rate: 0.4966000000 bit error rate: 0.0005594238 
+block error rate: 0.0097000000 bit error rate: 0.0000043132 
+block error rate: 0.0002000000 bit error rate: 0.0000000651 
+block error rate: 0.0000000000 bit error rate: 0.0000000000 
+block error rate: 0.0000000000 bit error rate: 0.0000000000 
+block error rate: 0.0000000000 bit error rate: 0.0000000000 
+
+block error rate: 1.0000000000 bit error rate: 0.0629157878 
+block error rate: 0.9998000000 bit error rate: 0.0089197591 
+block error rate: 0.2471000000 bit error rate: 0.0001686849 
+block error rate: 0.0020000000 bit error rate: 0.0000006836 
+block error rate: 0.0000000000 bit error rate: 0.0000000000 
+block error rate: 0.0000000000 bit error rate: 0.0000000000 
+block error rate: 0.0000000000 bit error rate: 0.0000000000 
+block error rate: 0.0000000000 bit error rate: 0.0000000000 
+

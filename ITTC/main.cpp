@@ -37,9 +37,9 @@ int main()
 	f2 =480; 					//与码长有关的交织器参数
 
 	double EbN0start = 0;//0;		//仿真起始信噪比
-	double EbN0end = 2;//4;		//最大仿真终止信噪比
-	double EbN0step =0.2;		//仿真信噪比步长
-	int FrameNum=100000;	
+	double EbN0end = 1;//4;		//最大仿真终止信噪比
+	double EbN0step =0.1;		//仿真信噪比步长
+	int FrameNum=10000;	
 
 	int floatorfix = 0;//1-fix,0-float
 		
