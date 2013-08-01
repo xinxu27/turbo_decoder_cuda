@@ -39,7 +39,7 @@ int main()
 	double EbN0start = 0;//0;		//仿真起始信噪比
 	double EbN0end = 1;//4;		//最大仿真终止信噪比
 	double EbN0step =0.1;		//仿真信噪比步长
-	int FrameNum=10000;	
+	int FrameNum=100000;	
 
 	int floatorfix = 0;//1-fix,0-float
 		
@@ -63,8 +63,8 @@ int main()
 	int nf, i1,snr_num,result_num=0;
 	double *err_bit_rate,*err_block_rate;
 
-	int N_ITERATION=8;
-	int temp[8],err_bit_num[8], err_block_num[8];
+	int N_ITERATION=15;
+	int temp[15],err_bit_num[15], err_block_num[15];
 	int i2;
 
 	FILE *fp;   
